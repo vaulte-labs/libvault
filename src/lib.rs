@@ -79,7 +79,7 @@ pub use net::pair::{Join, PendingJoin};
 pub use net::relay;
 pub use project::{EnvFileInfo, device_name, find_env_files, link_folder, linked_space};
 pub use protocol::RelayIssuer;
-pub use protocol::{AutofillIdentity, CurrentCode, FillOption, Filled, LoginInto};
+pub use protocol::{AutofillIdentity, CurrentCode, FillOption, Filled, LoginInto, SignUpWith};
 pub use protocol::{NewPasskey, PasskeyAssertion, PasskeyOption, PasskeyRequest, SpaceCode};
 pub use recover::{History, Recovery};
 pub use recovery::RecoveryDraft;

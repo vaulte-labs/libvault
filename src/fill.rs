@@ -39,6 +39,16 @@ impl Origin {
     }
 }
 
+/// The origin as a browser writes it, with the port only where it is not the scheme's own.
+impl std::fmt::Display for Origin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.scheme.as_str(), self.port) {
+            ("https", 443) | ("http", 80) => write!(f, "{}://{}", self.scheme, self.host),
+            _ => write!(f, "{}://{}:{}", self.scheme, self.host, self.port),
+        }
+    }
+}
+
 /// Whether a login saved for `saved` may fill on `page`. The page may be the saved host or a
 /// subdomain of it, on the same scheme and port. Plain HTTP is allowed only on this machine.
 pub fn matches(saved: &str, page: &Origin) -> bool {

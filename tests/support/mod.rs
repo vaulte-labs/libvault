@@ -3,6 +3,8 @@
 #![allow(dead_code, reason = "each test file uses part of this")]
 #![allow(unsafe_code, reason = "setting an environment variable once, before any broker starts")]
 
+pub mod chrome;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

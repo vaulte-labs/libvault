@@ -1,6 +1,6 @@
 //! Passkeys for a browser: which ones fit a page, making one for a site, and signing a sign-in.
-//! Each is the person's alone. Making or using one takes a touch naming the site, even for the
-//! vault's own apps, because a passkey tells the site its user was just verified.
+//! Making or using one takes a touch naming the site, even for the vault's own apps and for an
+//! agent, because a passkey tells the site its user was just verified. Only a person lists them.
 
 use super::Broker;
 use super::handlers::resolve_space;
@@ -81,14 +81,9 @@ impl Broker {
     /// the site. A passkey for another site is refused before anyone is asked.
     pub(super) fn sign_passkey(&self, caller: &Caller, space: &str, name: &str, origin: &str, client_data_hash: &[u8]) -> Result<Response> {
         let page = page(origin)?;
-        // A session is refused before anything is looked up, so the answer says nothing about
-        // what exists.
-        if matches!(caller, Caller::Session(_)) {
-            return self.check(caller, Action::UsePasskey { name, site: &page.host }).map(|()| Response::Ok);
-        }
         let secret = {
             let core = self.open_core()?;
-            let id = core.vault.space(space)?.id;
+            let id = resolve_space(&core.vault, caller, Some(space))?;
             let found = core.vault.find(&id, name)?;
             if found.meta.kind != Kind::Passkey {
                 return Err(Error::Invalid("that is not a passkey"));

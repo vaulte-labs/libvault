@@ -80,13 +80,20 @@ fn making_or_using_a_passkey_takes_a_touch_even_for_the_vaults_own_app() {
 }
 
 #[test]
-fn no_agent_lists_makes_or_uses_a_passkey() {
+fn an_agent_lists_no_passkeys_and_makes_or_uses_one_only_with_a_touch() {
     let vault = Vault::new();
     let (_, created) = made(&vault);
+    vault.space("work");
+    let mut elsewhere = vault.session_client(&vault.session("work", "agent"));
     let mut agent = vault.session_client(&vault.session("Personal", "agent"));
     assert_eq!(code(agent.passkey_options(SITE, Vec::new())), ErrorCode::Denied);
+    vault.deny_touches();
     assert_eq!(code(agent.create_passkey(request(SITE, "github.com"))), ErrorCode::Denied);
     assert_eq!(code(agent.sign_passkey("Personal", &created.name, "https://github.com", &client_data_hash())), ErrorCode::Denied);
+    vault.allow_touches();
+    assert!(agent.sign_passkey("Personal", &created.name, "https://github.com", &client_data_hash()).is_ok());
+    let outside = elsewhere.sign_passkey("Personal", &created.name, "https://github.com", &client_data_hash());
+    assert_eq!(code(outside), ErrorCode::Denied, "a grant reaches only its own space");
 }
 
 #[test]

@@ -6,6 +6,8 @@
 //! answers quickly, which is how a client tells a busy broker from a wedged one.
 
 mod accounts;
+mod agent_browser;
+mod agent_passkeys;
 mod asking;
 mod asks;
 mod browser;
@@ -21,6 +23,7 @@ mod policy;
 mod proxy;
 mod runs;
 mod shared_socket;
+mod signup;
 mod sync;
 
 use std::fs::Permissions;

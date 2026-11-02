@@ -155,7 +155,7 @@ pub(super) enum Verdict {
     Touch(String),
 }
 
-const PASSKEYS: &str = "a session cannot use passkeys. Ask for a sign-in instead";
+const PASSKEYS: &str = "a session cannot list passkeys. Name the one to sign in with";
 const MANAGE_VAULT: &str = "a session cannot manage the vault";
 const MAX_LISTED: usize = 3;
 
@@ -164,6 +164,14 @@ fn people_only(caller: &Caller, refusal: &'static str, verdict: Verdict) -> Verd
     match caller {
         Caller::Anyone | Caller::App => verdict,
         Caller::Session(_) => Verdict::Refuse(refusal),
+    }
+}
+
+/// Names the agent asking, where one is, since a person approving should know for whom.
+fn for_whom(caller: &Caller, what: String) -> String {
+    match caller {
+        Caller::Session(grant) => format!("let \"{}\" {what}", sanitize(&grant.agent)),
+        Caller::Anyone | Caller::App => what,
     }
 }
 
@@ -221,12 +229,12 @@ fn verdict(caller: &Caller, action: Action<'_>) -> Verdict {
         // such list to fill, and it would cross the space a grant gives.
         Action::AutofillIdentities => people_only(caller, "a session cannot list logins for AutoFill", Verdict::Allow),
         Action::ListPasskeys => people_only(caller, PASSKEYS, Verdict::Allow),
+        // A passkey tells the site its user was just verified, so a person always is, even when an
+        // agent asks.
         Action::CreatePasskey { site, user } => {
-            people_only(caller, PASSKEYS, Verdict::Touch(format!("save a passkey for {} on {}", sanitize(user), sanitize_host(site))))
+            Verdict::Touch(for_whom(caller, format!("save a passkey for {} on {}", sanitize(user), sanitize_host(site))))
         }
-        Action::UsePasskey { name, site } => {
-            people_only(caller, PASSKEYS, Verdict::Touch(format!("sign in to {} with {}", sanitize_host(site), sanitize(name))))
-        }
+        Action::UsePasskey { name, site } => Verdict::Touch(for_whom(caller, format!("sign in to {} with {}", sanitize_host(site), sanitize(name)))),
         Action::ChangeLockSettings => {
             people_only(caller, "a session cannot change when the vault locks", Verdict::Touch("change when your vault locks".to_owned()))
         }
@@ -467,5 +475,15 @@ mod tests {
         };
         assert!(!prompt.contains('\n'));
         assert_eq!(prompt.matches('"').count(), 2);
+    }
+
+    #[test]
+    fn a_passkey_an_agent_asks_for_names_the_agent() {
+        let create = Action::CreatePasskey { site: "github.com", user: "ada" };
+        let Verdict::Touch(prompt) = decide(&session(), create) else { panic!("a passkey needs a touch") };
+        assert_eq!(prompt, "let \"agent\" save a passkey for ada on github.com");
+        assert_eq!(decide(&Caller::Anyone, create), Verdict::Touch("save a passkey for ada on github.com".to_owned()));
+        assert!(touches(&decide(&session(), Action::UsePasskey { name: "ada on github.com", site: "github.com" })));
+        assert!(matches!(decide(&session(), Action::ListPasskeys), Verdict::Refuse(_)));
     }
 }

@@ -9,23 +9,16 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use libvault::item::{Meta, Secret};
 use libvault::{ErrorCode, LoginInto, Totp};
+use support::chrome::{AgentBrowser, has_browser};
 use support::{Vault, code};
-use tungstenite::Message;
 
 const PASSWORD: &str = "correct-horse-battery";
 const TOTP_SECRET: &str = "JBSWY3DPEHPK3PXP";
-
-const CHROME: &str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-
-fn has_browser() -> bool {
-    PathBuf::from(CHROME).exists()
-}
 
 /// A site with a login form. `posts` records every submission, so a test can prove what reached
 /// it and what did not.
@@ -402,60 +395,6 @@ fn an_agent_browser_elsewhere_is_refused_because_a_session_stays_on_this_machine
     assert_eq!(code(result), ErrorCode::Error);
 }
 
-/// A browser an agent would drive, debuggable over a local port.
-struct AgentBrowser {
-    child: Child,
-    profile: tempfile::TempDir,
-    port: u16,
-    path: String,
-}
-
-impl AgentBrowser {
-    #[allow(clippy::zombie_processes, reason = "Drop waits for it")]
-    fn launch() -> Self {
-        let profile = tempfile::tempdir().unwrap();
-        let child = Command::new(CHROME)
-            .args(["--headless=new", "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check"])
-            .arg(format!("--user-data-dir={}", profile.path().display()))
-            .arg("about:blank")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let active = profile.path().join("DevToolsActivePort");
-        for _ in 0..400 {
-            let text = std::fs::read_to_string(&active).unwrap_or_default();
-            let mut lines = text.lines();
-            if let (Some(Ok(port)), Some(path)) = (lines.next().map(str::parse), lines.next()) {
-                return Self { child, profile, port, path: path.to_owned() };
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        panic!("the agent's browser never opened its port");
-    }
-
-    fn cookies(&self) -> String {
-        let (mut socket, _) = tungstenite::connect(format!("ws://127.0.0.1:{}{}", self.port, self.path)).unwrap();
-        socket.send(Message::text(r#"{"id":1,"method":"Storage.getCookies"}"#)).unwrap();
-        loop {
-            if let Message::Text(text) = socket.read().unwrap() {
-                let reply: serde_json::Value = serde_json::from_str(text.as_str()).unwrap();
-                if reply["id"] == 1 {
-                    return reply["result"]["cookies"].to_string();
-                }
-            }
-        }
-    }
-}
-
-impl Drop for AgentBrowser {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = self.profile.path();
-    }
-}
-
 #[test]
 fn the_session_arrives_in_the_agents_own_browser_and_the_password_does_not() {
     if !has_browser() {
@@ -466,7 +405,7 @@ fn the_session_arrives_in_the_agents_own_browser_and_the_password_does_not() {
     let agent = AgentBrowser::launch();
     assert!(!agent.cookies().contains("signed-in-token"));
 
-    let cookies = vault.client().login(None, "Site", LoginInto::Browser(format!("http://127.0.0.1:{}", agent.port))).unwrap();
+    let cookies = vault.client().login(None, "Site", LoginInto::Browser(agent.address())).unwrap();
     assert_eq!(cookies, 1);
     let held = agent.cookies();
     assert!(held.contains("signed-in-token"), "{held}");

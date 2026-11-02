@@ -89,6 +89,12 @@ fn read_messages(reader: impl Read, sender: &mpsc::Sender<Value>) {
     }
 }
 
+/// Something that speaks the debugging protocol: the broker's own browser, or an agent's.
+pub(super) trait Devtools {
+    /// Calls the browser and returns the result. `session` targets a tab.
+    fn call(&mut self, method: &str, params: &Value, session: Option<&str>) -> Result<Value>;
+}
+
 impl Browser {
     pub fn launch(profile: PathBuf) -> Result<Self> {
         crate::store::private_dir(&profile)?;
@@ -116,8 +122,18 @@ impl Browser {
         Ok(Self { child, writer, replies, next_id: 0, profile })
     }
 
-    /// Calls the browser, ignoring events. `session` targets a tab.
-    pub fn call(&mut self, method: &str, params: &Value, session: Option<&str>) -> Result<Value> {
+    /// Opens a tab at `about:blank` and attaches to it.
+    pub fn open_tab(&mut self) -> Result<Tab<'_, Self>> {
+        let target = self.call("Target.createTarget", &json!({ "url": "about:blank" }), None)?;
+        let attached = self.call("Target.attachToTarget", &json!({ "targetId": target["targetId"], "flatten": true }), None)?;
+        let session = attached["sessionId"].as_str().ok_or(FAILED)?.to_owned();
+        Ok(Tab { browser: self, session })
+    }
+}
+
+impl Devtools for Browser {
+    /// Ignores events.
+    fn call(&mut self, method: &str, params: &Value, session: Option<&str>) -> Result<Value> {
         self.next_id += 1;
         let id = self.next_id;
         let mut message = json!({ "id": id, "method": method, "params": params });
@@ -136,14 +152,6 @@ impl Browser {
                 return if reply.get("error").is_some() { Err(FAILED) } else { Ok(reply["result"].clone()) };
             }
         }
-    }
-
-    /// Opens a tab at `about:blank` and attaches to it.
-    pub fn open_tab(&mut self) -> Result<Tab<'_>> {
-        let target = self.call("Target.createTarget", &json!({ "url": "about:blank" }), None)?;
-        let attached = self.call("Target.attachToTarget", &json!({ "targetId": target["targetId"], "flatten": true }), None)?;
-        let session = attached["sessionId"].as_str().ok_or(FAILED)?.to_owned();
-        Ok(Tab { browser: self, session })
     }
 }
 
@@ -165,13 +173,13 @@ const SUBMIT: &str = "(() => {
 })()";
 
 #[derive(Debug)]
-pub(super) struct Tab<'a> {
-    browser: &'a mut Browser,
-    session: String,
+pub(super) struct Tab<'a, D: Devtools> {
+    pub(super) browser: &'a mut D,
+    pub(super) session: String,
 }
 
-impl Tab<'_> {
-    fn call(&mut self, method: &str, params: &Value) -> Result<Value> {
+impl<D: Devtools> Tab<'_, D> {
+    pub fn call(&mut self, method: &str, params: &Value) -> Result<Value> {
         self.browser.call(method, params, Some(&self.session))
     }
 

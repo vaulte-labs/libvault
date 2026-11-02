@@ -26,6 +26,14 @@ pub enum LoginInto {
     StateFile(PathBuf),
 }
 
+/// How a new account will prove who signs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignUpWith {
+    Password,
+    Passkey,
+}
+
 /// A login as the system's autofill may suggest it, even while the vault is locked: a site and a
 /// username, never a secret. Picking one still goes through `fill` and its touch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,6 +257,13 @@ pub enum Request {
         name: String,
         into: LoginInto,
     },
+    /// `into` is the local debugging address of the browser holding the sign-up page.
+    SignUp {
+        space: Option<String>,
+        site: String,
+        into: String,
+        with: SignUpWith,
+    },
     FillOptions {
         origin: String,
     },
@@ -332,6 +347,7 @@ pub enum Response {
     Removed { exposed: Vec<String> },
     Verified(BackupReport),
     LoggedIn { cookies: usize },
+    SignedUp { name: String },
     FillOptions { options: Vec<FillOption> },
     AutofillIdentities { identities: Vec<AutofillIdentity> },
     PasskeyOptions { options: Vec<PasskeyOption> },

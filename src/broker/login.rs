@@ -2,17 +2,15 @@
 //! browser, checks the page's origin before each value, puts that value in the one field it checked,
 //! and hands over only the session. Passwords reach only the page that matches the saved login.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tungstenite::Message;
 
 use super::Broker;
-use super::browser::{Browser, Tab};
+use super::agent_browser::{AgentBrowser, locate};
+use super::browser::{Browser, Devtools, Tab};
 use super::handlers::resolve_space;
 use super::policy::{Action, Caller};
 use super::proxy::reflected_forms;
@@ -28,10 +26,6 @@ const MAX_STEPS: usize = 5;
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 const SETTLE_POLL: Duration = Duration::from_millis(100);
 const STABLE_FOR: Duration = Duration::from_millis(300);
-const DEVTOOLS_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_DEVTOOLS_BODY: usize = 64 * 1024;
-const MAX_DEVTOOLS_REPLY: u64 = 256 * 1024;
-const HAND_OVER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Describes the page's visible fields, and remembers them in this world, where the page cannot
 /// reach them. It reads the page and reports, and takes no input.
@@ -60,7 +54,7 @@ struct Page {
 }
 
 /// What is on the page, and the world that saw it. The address comes from the browser, last.
-fn inspect(tab: &mut Tab<'_>) -> Result<(Page, u64)> {
+fn inspect(tab: &mut Tab<'_, Browser>) -> Result<(Page, u64)> {
     let world = tab.world()?;
     let mut page: Page = serde_json::from_str(&tab.evaluate(world, INSPECT)?).map_err(|_| Error::Peer("the page could not be read"))?;
     page.href = tab.url()?;
@@ -68,7 +62,7 @@ fn inspect(tab: &mut Tab<'_>) -> Result<(Page, u64)> {
 }
 
 /// Waits for the page to stop changing, then reports what is on it.
-fn settle(tab: &mut Tab<'_>) -> Result<Page> {
+fn settle(tab: &mut Tab<'_, Browser>) -> Result<Page> {
     let deadline = Instant::now() + SETTLE_TIMEOUT;
     let mut last = inspect(tab).ok().map(|(page, _)| page);
     let mut stable_since = Instant::now();
@@ -93,7 +87,7 @@ fn settle(tab: &mut Tab<'_>) -> Result<Page> {
 /// Puts a value in a field, only if the page is still one this login belongs on and this sign-in
 /// may still go on. It goes to that element and nowhere else, so that whatever else on the page holds
 /// focus never sees it. Returns the world, for submitting what it filled.
-fn enter(tab: &mut Tab<'_>, credentials: &Credentials<'_>, field: &str, value: &str) -> Result<u64> {
+fn enter(tab: &mut Tab<'_, Browser>, credentials: &Credentials<'_>, field: &str, value: &str) -> Result<u64> {
     (credentials.may_go_on)()?;
     let (page, world) = inspect(tab)?;
     let origin = Origin::parse(&page.href).ok_or(Error::LoginRefused("the page has no origin"))?;
@@ -116,7 +110,7 @@ struct Credentials<'a> {
 }
 
 /// Walks the sign-in. A refused password is never retried, since that can lock the account.
-fn sign_in(tab: &mut Tab<'_>, credentials: &Credentials<'_>) -> Result<()> {
+fn sign_in(tab: &mut Tab<'_, Browser>, credentials: &Credentials<'_>) -> Result<()> {
     tab.goto(credentials.saved)?;
     let (mut typed_user, mut typed_password, mut typed_code) = (false, false, false);
     for _ in 0..MAX_STEPS {
@@ -189,65 +183,10 @@ fn playwright_state(cookies: &Value) -> Value {
     json!({ "cookies": cookies, "origins": [] })
 }
 
-/// Asks a local debugging endpoint for its socket address. Chrome leaves the connection open,
-/// so this reads exactly the advertised length, with a timeout so a bad endpoint cannot stall.
-fn devtools_socket(endpoint: &str) -> Result<String> {
-    let not_devtools = || Error::Peer("that is not a DevTools address");
-    let origin = Origin::parse(endpoint).filter(|origin| origin.scheme == "http");
-    let origin = origin.ok_or(Error::Invalid("the agent's browser must be a local DevTools address, like http://127.0.0.1:9222"))?;
-    let authority = format!("{}:{}", origin.host, origin.port);
-    // What was checked is what is reached, whatever else the address was written to look like.
-    let mut stream = TcpStream::connect(&authority)?;
-    stream.set_read_timeout(Some(DEVTOOLS_TIMEOUT))?;
-    stream.write_all(format!("GET /json/version HTTP/1.1\r\nHost: {authority}\r\n\r\n").as_bytes())?;
-
-    // The agent chose this address, so what answers may be hostile. It gets a fixed allowance.
-    let mut reader = BufReader::new(stream.take(MAX_DEVTOOLS_REPLY));
-    let mut length = None;
-    let mut line = String::new();
-    loop {
-        line.clear();
-        reader.read_line(&mut line)?;
-        if line.trim().is_empty() {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':')
-            && name.eq_ignore_ascii_case("content-length")
-        {
-            length = value.trim().parse::<usize>().ok();
-        }
-    }
-    let mut body = vec![0u8; length.ok_or_else(not_devtools)?.min(MAX_DEVTOOLS_BODY)];
-    reader.read_exact(&mut body)?;
-    let version: Value = serde_json::from_slice(&body).map_err(|_| not_devtools())?;
-    version["webSocketDebuggerUrl"].as_str().map(str::to_owned).ok_or_else(not_devtools)
-}
-
-/// Whether a debugger address, which whoever answered at `endpoint` wrote, is that same endpoint.
-fn is_same_place(url: &str, endpoint: &Origin) -> bool {
-    url.strip_prefix("ws://")
-        .and_then(|rest| Origin::parse(&format!("http://{rest}")))
-        .is_some_and(|socket| socket.host == endpoint.host && socket.port == endpoint.port)
-}
-
-/// The agent's browser and its debugger address. Cookies stay on this machine: `endpoint` must
-/// be local.
-fn agent_browser(endpoint: &str) -> Result<(Origin, String)> {
-    let origin = Origin::parse(endpoint).ok_or(Error::Invalid("that address cannot be read"))?;
-    if !matches!(origin.host.as_str(), "127.0.0.1" | "localhost") {
-        return Err(Error::Invalid("a session can only be handed to a browser on this machine"));
-    }
-    let url = devtools_socket(endpoint)?;
-    if !is_same_place(&url, &origin) {
-        return Err(Error::Invalid("a session can only be handed to a browser on this machine"));
-    }
-    Ok((origin, url))
-}
-
 /// Whether a session could go where it was asked to, known before anything is typed.
 fn check_destination(into: &LoginInto) -> Result<()> {
     match into {
-        LoginInto::Browser(endpoint) => agent_browser(endpoint).map(|_| ()),
+        LoginInto::Browser(endpoint) => locate(endpoint).map(|_| ()),
         LoginInto::StateFile(path) if path.is_relative() => Err(Error::Invalid("a session file needs a full path")),
         LoginInto::StateFile(path) if path.exists() => Err(Error::Exists(path.display().to_string())),
         LoginInto::StateFile(_) => Ok(()),
@@ -256,26 +195,20 @@ fn check_destination(into: &LoginInto) -> Result<()> {
 
 /// Puts the session in the agent's browser.
 fn hand_over(endpoint: &str, cookies: &Value) -> Result<()> {
-    let (origin, url) = agent_browser(endpoint)?;
-    let stream = TcpStream::connect((origin.host.as_str(), origin.port))?;
-    stream.set_read_timeout(Some(DEVTOOLS_TIMEOUT))?;
-    stream.set_write_timeout(Some(DEVTOOLS_TIMEOUT))?;
-    let (mut socket, _) = tungstenite::client(url.as_str(), stream).map_err(|_| Error::Peer("the agent's browser refused the connection"))?;
-    let call = json!({ "id": 1, "method": "Storage.setCookies", "params": { "cookies": cookies } });
-    socket.send(Message::text(call.to_string())).map_err(|_| Error::Peer("the agent's browser stopped responding"))?;
-    let deadline = Instant::now() + HAND_OVER_TIMEOUT;
-    while Instant::now() < deadline {
-        let message = socket.read().map_err(|_| Error::Peer("the agent's browser stopped responding"))?;
-        let Message::Text(text) = message else { continue };
-        let reply: Value = serde_json::from_str(text.as_str()).unwrap_or_default();
-        if reply["id"] == 1 {
-            return if reply.get("error").is_some() { Err(Error::Peer("the agent's browser refused the session")) } else { Ok(()) };
-        }
-    }
-    Err(Error::Peer("the agent's browser stopped responding"))
+    AgentBrowser::connect(endpoint)?.call("Storage.setCookies", &json!({ "cookies": cookies }), None).map(drop)
 }
 
 impl Broker {
+    /// Whether work begun now may still go on. A lock always wins, and so does the end of a grant.
+    pub(super) fn while_open<'a>(&'a self, caller: &'a Caller) -> Result<impl Fn() -> Result<()> + 'a> {
+        let locks = self.open_core()?.locks;
+        Ok(move || {
+            let mut core = self.open_core()?;
+            let grant_stands = if let Caller::Session(grant) = caller { core.grants.is_live(&grant.id) } else { true };
+            if core.locks == locks && grant_stands { Ok(()) } else { Err(Error::Locked) }
+        })
+    }
+
     /// Signs in with a saved login and hands over the session. The password goes only to pages
     /// that match the login, in a browser nothing else can reach.
     pub(super) fn login(&self, caller: &Caller, space: Option<&str>, name: &str, into: &LoginInto) -> Result<Response> {
@@ -284,6 +217,12 @@ impl Broker {
             let id = resolve_space(&core.vault, caller, space)?;
             (id, core.vault.find(&id, name)?)
         };
+        if item.meta.kind == Kind::Passkey {
+            let LoginInto::Browser(endpoint) = into else {
+                return Err(Error::Invalid("a passkey signs in only in the agent's own browser. Use --into"));
+            };
+            return self.sign_in_with_passkey(caller, &id, &item, endpoint);
+        }
         if item.meta.kind != Kind::Login {
             return Err(Error::Invalid("that is not a login"));
         }
@@ -296,17 +235,10 @@ impl Broker {
         let site = Origin::parse(&saved).map(|origin| origin.host).unwrap_or_default();
         self.check(caller, Action::Login { name, site: &site, into: &into_shown })?;
 
-        let (secret, locks) = {
-            let core = self.open_core()?;
-            (core.vault.secret(&id, &item.id)?, core.locks)
-        };
+        let may_go_on = self.while_open(caller)?;
+        let secret = self.open_core()?.vault.secret(&id, &item.id)?;
         let Secret::Login { password, totp } = &secret else { return Err(Error::Invalid("that is not a login")) };
         let totp = totp.as_deref().map(Totp::parse).transpose()?;
-        let may_go_on = || {
-            let mut core = self.open_core()?;
-            let grant_stands = if let Caller::Session(grant) = caller { core.grants.is_live(&grant.id) } else { true };
-            if core.locks == locks && grant_stands { Ok(()) } else { Err(Error::Locked) }
-        };
         let credentials = Credentials { saved: &saved, username: item.meta.username.as_deref(), password, totp, may_go_on: &may_go_on };
         // Before anything is typed, so an attempt that fails halfway is on the record too.
         self.open_core()?.vault.record("login", name, caller.name())?;
@@ -333,40 +265,4 @@ impl Broker {
 fn write_state(path: &Path, state: &Value) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(state).map_err(|_| Error::Peer("the session could not be saved"))?;
     crate::export::write_new(path, &bytes)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::TcpListener;
-
-    use super::*;
-
-    #[test]
-    fn a_debugger_address_must_be_the_one_that_was_asked() {
-        let endpoint = Origin::parse("http://127.0.0.1:9222").unwrap();
-        assert!(is_same_place("ws://127.0.0.1:9222/devtools/browser/x", &endpoint));
-        for elsewhere in [
-            "ws://attacker.example:9222/devtools/browser/x",
-            "ws://127.0.0.1.attacker.example:9222/x",
-            "ws://127.0.0.1@attacker.example:9222/x",
-            "ws://127.0.0.1:9223/x",
-            "wss://127.0.0.1:9222/x",
-            "nonsense",
-        ] {
-            assert!(!is_same_place(elsewhere, &endpoint), "{elsewhere}");
-        }
-    }
-
-    #[test]
-    fn an_endless_reply_from_a_debugger_address_is_cut_off() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            while stream.write_all(&[b'a'; 4096]).is_ok() {}
-        });
-        let (done, finished) = std::sync::mpsc::channel();
-        std::thread::spawn(move || done.send(devtools_socket(&endpoint).is_err()));
-        assert_eq!(finished.recv_timeout(Duration::from_secs(5)), Ok(true), "it would read until memory ran out");
-    }
 }

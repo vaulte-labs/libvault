@@ -126,6 +126,7 @@ impl Broker {
             Request::AutofillIdentities => self.autofill_identities(caller),
             Request::PasskeyOptions { origin, allow } => self.passkey_options(caller, &origin, &allow),
             Request::CreatePasskey(request) => self.create_passkey(caller, &request),
+            Request::SignUp { space, site, into, with } => self.sign_up(caller, space.as_deref(), &site, &into, with),
             Request::SignPasskey { space, name, origin, client_data_hash } => self.sign_passkey(caller, &space, &name, &origin, &client_data_hash),
             Request::LockSettings => self.check(caller, Action::Read).map(|()| Response::LockSettings(self.core().settings)),
             Request::SetLockSettings { settings } => {

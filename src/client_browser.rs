@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 
 use super::{Client, Connect, SHARED_SOCKET, UNEXPECTED};
 use crate::protocol::{
-    AutofillIdentity, FillOption, Filled, LoginInto, NewPasskey, PasskeyAssertion, PasskeyOption, PasskeyRequest, Request, Response,
+    AutofillIdentity, FillOption, Filled, LoginInto, NewPasskey, PasskeyAssertion, PasskeyOption, PasskeyRequest, Request, Response, SignUpWith,
 };
 use crate::{Error, Result};
 
@@ -32,10 +32,23 @@ impl Client {
     }
 
     /// Signs in with a saved login in a browser nothing else can reach, and hands over only the
-    /// session. Returns how many cookies it carried. Needs a touch, unless a session covers it.
+    /// session. Returns how many cookies it carried. Needs a touch, unless a session covers it. A
+    /// passkey signs in only in the agent's browser, which gets its session from the site itself,
+    /// so it carries none, and it takes a touch every time.
     pub fn login(&mut self, space: Option<&str>, name: &str, into: LoginInto) -> Result<usize> {
         match self.call(Request::Login { space: space.map(str::to_owned), name: name.to_owned(), into })? {
             Response::LoggedIn { cookies } => Ok(cookies),
+            _ => Err(UNEXPECTED),
+        }
+    }
+
+    /// Signs up for `site` in the agent's browser at `into`, where the sign-up form is open, and
+    /// returns the name the account is saved under. A password is made and put in the form, which
+    /// the agent then submits. A passkey is made when the page asks for one, after a touch.
+    pub fn sign_up(&mut self, space: Option<&str>, site: &str, into: &str, with: SignUpWith) -> Result<String> {
+        let request = Request::SignUp { space: space.map(str::to_owned), site: site.to_owned(), into: into.to_owned(), with };
+        match self.call(request)? {
+            Response::SignedUp { name } => Ok(name),
             _ => Err(UNEXPECTED),
         }
     }

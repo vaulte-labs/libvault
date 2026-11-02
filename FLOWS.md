@@ -283,9 +283,44 @@ its user was just verified. Which passkeys fit a page is answered without a touc
 | The site already has a passkey for this person here | Refused, so none is made twice. |
 | An interface hands in a passkey's private key | Refused. Keys are made in the broker. |
 | A reveal | Shows the site, account and credential, never the private key. |
-| A session asks | Refused, for listing, making and signing alike. |
+| A session asks to list them | Refused. It names the one it signs in with. |
+| A session makes or signs with one | A touch every time, naming the agent, as in flow 12. |
 
-## 12. Sign in for an agent
+## 12. Sign up and sign in for an agent
+
+An agent makes accounts the way a person would, in the browser it drives, and the vault keeps what
+proves them. The agent fills in the form and submits it. Vaulte only puts in the secret.
+
+`vlt signup github.com --into http://127.0.0.1:9222`, with the sign-up form open there.
+
+| Step | What happens |
+|---|---|
+| 1 | Session checked. Saving something new needs no touch, as in flow 3. |
+| 2 | Finds the agent's tab on that site, asking the browser for its address, not the page. |
+| 3 | Makes a password and puts it in the form's password field and its confirmation, each by reference. |
+| 4 | Saves the login with the site and the username the form holds, under the agent's name in the audit. |
+| 5 | The agent submits the form. |
+
+The password never passes through the agent's output or its model. Whatever drives the browser
+could still read the page, which is why this only ever hands over a password made for this
+sign-up, never one the vault held. Signing in later is `vlt login`, which shows it nothing.
+
+`vlt signup github.com --passkey --into ...` waits while the agent uses the page's passkey button.
+The broker answers the page itself, as the extension does: the site asks, a touch names the agent,
+the account and the site, and the key is made in the broker like any other passkey. The browser
+gets the public half, never the private key. `vlt login NAME --into ...` with a passkey works the
+same way, signing the site's challenge after a touch naming the passkey and the site.
+
+| Failure | Result |
+|---|---|
+| No tab on that site | Exit `5`. Nothing saved. |
+| No password field on the page | Exit `1`. Nothing saved. |
+| The page moves to another site | Refused before anything is put in. |
+| The login cannot be saved | The fields are emptied again, so nothing unsaved is submitted. |
+| Passkey refused, or the vault locks or the grant ends | Nothing saved. A page that asked hears no. |
+| Nothing on the page asks for a passkey within 2 minutes | Exit `6`, and the page is left as it was. |
+| The site asks for a passkey this is not | Refused before anyone is asked. |
+| A passkey sign-in into a session file | Refused. A passkey signs in only in the agent's own browser. |
 
 `vlt login NAME --into http://127.0.0.1:9222`, or `--state session.json` for a Playwright file.
 
