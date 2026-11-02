@@ -604,6 +604,33 @@ fn a_broker_takes_nothing_from_the_environment_of_whoever_started_it() {
 }
 
 #[test]
+fn sigterm_stops_a_broker_even_when_whatever_started_it_ignored_that() {
+    let vault = Vault::new();
+    // An ignored signal carries over to whatever a process starts, and `trap ''` ignores it.
+    let mut broker = std::process::Command::new("/bin/sh")
+        .args(["-c", "trap '' TERM; exec \"$0\"", support::LVD])
+        .env("LV_HOME", &vault.home)
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = broker.id().to_string();
+    let started = Instant::now();
+    while fs::read_to_string(vault.home.join("run/lvd.pid")).ok().as_deref() != Some(pid.as_str()) {
+        assert!(started.elapsed() < Duration::from_secs(5), "the broker never started");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::process::Command::new("/bin/kill").args(["-TERM", &pid]).status().unwrap();
+    let started = Instant::now();
+    while broker.try_wait().unwrap().is_none() {
+        if started.elapsed() > Duration::from_secs(5) {
+            broker.kill().unwrap();
+            panic!("SIGTERM did not stop it, so neither would logging out");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
 fn a_session_cannot_stop_the_broker() {
     let vault = Vault::new();
     vault.space("project-a");

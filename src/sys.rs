@@ -25,6 +25,10 @@ pub(crate) fn harden_process() {
     }
 
     ignore_signal(libc::SIGHUP);
+    // Whatever started the broker may have ignored SIGTERM, which carries over, and then neither
+    // `kill` nor logging out would stop it.
+    // SAFETY: restoring a signal's default is always valid.
+    unsafe { libc::signal(libc::SIGTERM, libc::SIG_DFL) };
 }
 
 /// Key bytes, held in memory locked out of swap and erased as they are let go. Locking every page
