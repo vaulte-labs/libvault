@@ -77,7 +77,9 @@ impl Waiting {
         match self.control.read(&mut id[..1]) {
             Ok(0) => return Err(Error::Peer("the relay hung up")),
             Ok(_) => {}
-            Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => return Ok(None),
+            // A signal cuts a read with a timeout short on Linux and is never restarted, so it
+            // counts as waiting on, not as the relay going away.
+            Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted) => return Ok(None),
             Err(error) => return Err(error.into()),
         }
         // The relay writes an id whole, so once it has begun the rest is moments away.
