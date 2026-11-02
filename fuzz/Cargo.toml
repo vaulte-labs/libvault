@@ -1,0 +1,141 @@
+[package]
+name = "libvault-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+libvault = { path = "..", features = ["fuzz"] }
+
+# Not part of any workspace.
+[workspace]
+
+[[bin]]
+name = "log"
+path = "fuzz_targets/log.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "body"
+path = "fuzz_targets/body.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive"
+path = "fuzz_targets/archive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tails"
+path = "fuzz_targets/tails.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lengths"
+path = "fuzz_targets/lengths.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "join_request"
+path = "fuzz_targets/join_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ask"
+path = "fuzz_targets/ask.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "beacon"
+path = "fuzz_targets/beacon.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "padded_item"
+path = "fuzz_targets/padded_item.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "broker_frame"
+path = "fuzz_targets/broker_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "origin"
+path = "fuzz_targets/origin.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "totp"
+path = "fuzz_targets/totp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "env_file"
+path = "fuzz_targets/env_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "apple_passwords"
+path = "fuzz_targets/apple_passwords.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scrubber"
+path = "fuzz_targets/scrubber.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "replay"
+path = "fuzz_targets/replay.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "noise_frames"
+path = "fuzz_targets/noise_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "icon"
+path = "fuzz_targets/icon.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,3 @@
+[tools]
+# check.sh runs rustfmt and Clippy, which a minimal rustup profile leaves out.
+rust = { version = "1.99.1", components = ["rustfmt", "clippy"] }

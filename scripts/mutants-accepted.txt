@@ -1,0 +1,53 @@
+# Survivors that change nothing a person or an attacker could see, each with why.
+# Printing nothing for a key leaks nothing.
+src/crypto.rs: replace <impl std::fmt::Debug for Key>::fmt -> std::fmt::Result with Ok(Default::default())
+# Replaying everything together first only saves time. One at a time reaches the same result.
+src/sync/merge.rs: delete ! in Vault::merge_logs
+# Counts the first log of a device already known against the limit, which needs sixteen in one sync.
+src/sync/merge.rs: replace && with || in Vault::logs_worth_trying
+# Wiping memory on drop cannot be observed from safe code.
+src/scrub.rs: replace <impl Drop for Scrubber>::drop with ()
+# A device's own log starts with what enrolled it, and a removal cannot cut that, so nothing keeps none.
+src/state/rules.rs: replace > with >= in State::forked_past_removal
+# The newest clean generation is itself a head, or reached from one that goes to the same
+# devices and the words, so naming it again only adds wraps of keys already held.
+src/roster.rs: replace && with || in Vault::share_newest_keys
+src/roster.rs: replace == with != in Vault::share_newest_keys
+# With ties broken by device, an equal version is the orphan's own, which a cut has removed.
+src/rescue.rs: replace < with <= in Vault::lost_items
+# A day, in milliseconds. A test would wait a day, or need a clock this code does not take.
+src/sync/merge.rs: replace * with +
+src/sync/merge.rs: replace * with /
+# Only orders which new logs a sync tries first, against a limit. Replay judges each one anyway.
+src/state/rules.rs: replace && with || in State::approves_enrollment
+src/state/rules.rs: replace == with != in State::approves_enrollment
+# A device's own log starts with what enrolled it, and a removal cannot cut that, so nothing keeps none.
+src/state/rules.rs: replace > with >= in State::is_what_its_removal_kept
+# A listening socket fails only with WouldBlock unless the system takes it away.
+src/net/pair.rs: replace match guard error.kind() == std::io::ErrorKind::WouldBlock with true in Join::wait
+# Leaves a thread announcing a join nobody waits on, which shows only on the network.
+src/net/pair.rs: replace <impl Drop for Join>::drop with ()
+# Only decides which candidate takes the state instead of a copy of it. The result is the same.
+src/state/rules.rs: replace + with * in State::settle_roster
+# The limit is a gibibyte, which only the by-hand test reaches.
+src/sync/merge.rs: replace > with == in Vault::logs_worth_trying
+src/sync/merge.rs: replace > with >= in Vault::logs_worth_trying
+# The limit becomes the alphabet's own length, which throws away more bytes and stays just as even.
+src/generate.rs: replace % with + in random_character
+# Wiping memory on drop cannot be observed from safe code.
+src/listing.rs: replace wipe with ()
+src/listing.rs: replace <impl Drop for Listing>::drop with ()
+# The row with this id was taken out just before, so no row is equal to the new one.
+src/listing.rs: replace < with <= in Vault::reread_row
+# Each flag is its own bit, so setting them with ^ gives the same byte as with |.
+src/passkey.rs: replace | with ^ in create
+src/passkey.rs: replace | with ^ in sign
+# Printing nothing for a profile leaks nothing.
+src/profile.rs: replace <impl std::fmt::Debug for Profile>::fmt -> std::fmt::Result with Ok(Default::default())
+# Reads this process's own path and PATH, which a test cannot set without racing every other.
+# installed_daemon, which decides from them, is tested.
+src/client_builds.rs: replace find_daemon -> Option<PathBuf> with None
+src/client_builds.rs: replace find_daemon -> Option<PathBuf> with Some(Default::default())
+# The stub for systems other than macOS, which is not built where these run. The macOS one of the
+# same name is caught by the shared folder test in tests/apps.rs.
+src/broker/shared_socket.rs: replace folder -> Option<PathBuf> with Some(Default::default())

@@ -1,0 +1,32 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # build.rs compiles the enclave bridge for macOS 26 with Xcode 26's swiftc.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: libvault
+          persist-credentials: false
+      # The relay tests need lv-relay, from the private repository, through a read-only deploy key.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: vaulte-labs/relay
+          path: relay
+          ssh-key: ${{ secrets.RELAY_DEPLOY_KEY }}
+          persist-credentials: false
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          working_directory: libvault
+      - run: scripts/check.sh
+        working-directory: libvault
