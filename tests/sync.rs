@@ -740,6 +740,23 @@ fn what_an_agent_saves_on_a_server_reaches_the_laptop() {
     server.session_client(&token).add(Some("Agents"), Meta::env("NEW_TOKEN"), env("fresh"), false).unwrap();
     assert_eq!(arrives_in(&laptop, Some("Agents"), "NEW_TOKEN"), "fresh");
 }
+#[test]
+fn a_change_from_the_laptop_leaves_the_server_s_agent_its_grant() {
+    let (laptop, server) = laptop_and_agents_server();
+    let token = nobody_at(&server).grant(Some("Agents"), "deploy-bot", Duration::from_secs(3600), Some("deploying")).unwrap().token;
+    let agent = || server.session_client(&token);
+    assert!(agent().items(Some("Agents")).is_ok(), "the grant works before anything changes");
+    laptop.add_env("ROTATED_TOKEN", "new", Some("Agents"));
+    for _ in 0..200 {
+        let names: Vec<String> =
+            agent().items(Some("Agents")).expect("the grant outlives a change from the laptop").into_iter().map(|item| item.meta.name).collect();
+        if names.iter().any(|name| name == "ROTATED_TOKEN") {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("the change never reached the server");
+}
 
 #[test]
 fn a_server_keeps_its_spaces_through_a_rotation_and_is_given_nothing_else() {

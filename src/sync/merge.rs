@@ -353,16 +353,21 @@ impl Vault {
     /// keep interrupting its own removal.
     fn has_to_lock(&mut self) -> bool {
         let removed = self.state.members.get(&self.me).is_some_and(|member| member.standing != Standing::Active);
-        if removed || self.writing_epoch(&self.state.clean_epochs()).is_none() {
+        let Some(keys) = self.keys.as_ref() else { return removed };
+        // A server holding chosen spaces has no epochs at all, and opening again would give it
+        // none, so locking it would only end its agents' grants.
+        if removed || (!keys.epochs.is_empty() && self.writing_epoch(&self.state.clean_epochs()).is_none()) {
             return true;
         }
-        let Some(keys) = self.keys.as_ref() else { return false };
+        let new_space_keys =
+            self.state.space_wraps.iter().filter(|wrap| wrap.device == self.me && !keys.spaces.contains_key(&(wrap.space, wrap.version)));
         let untried: BTreeSet<DeviceId> = self
             .my_wraps()
             .iter()
             .map(|(epoch, _)| epoch)
             .filter(|epoch| !keys.epochs.contains_key(epoch) && !keys.unreadable.contains(epoch))
             .map(|epoch| epoch.author)
+            .chain(new_space_keys.map(|wrap| wrap.by))
             .collect();
         let now = log::now_ms();
         let may_lock: Vec<DeviceId> =
