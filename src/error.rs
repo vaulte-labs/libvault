@@ -48,7 +48,7 @@ pub enum Error {
     VaultExists,
     #[error("another process has this vault open")]
     Busy,
-    #[error("no vault here. Create one first")]
+    #[error("there is no vault on this device")]
     NoVault,
     #[error("no secure hardware on this device")]
     NoHardware,
@@ -82,7 +82,7 @@ pub enum Error {
     LoginRefused(&'static str),
     #[error("the vault log is damaged: {0}")]
     Corrupt(&'static str),
-    #[error("this vault needs a newer version of Vaulty")]
+    #[error("this vault needs a newer version of Vaulte. Update it, then try again")]
     Newer,
     #[error("not approved: {0}")]
     NotApproved(&'static str),

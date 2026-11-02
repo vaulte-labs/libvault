@@ -470,7 +470,7 @@ fn spawn(home: &Path, daemon: &Path) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| Error::BrokerUnavailable("lvd could not be started; is it installed beside this program?"))?;
+        .map_err(|_| Error::BrokerUnavailable("Vaulte's broker could not be started; is it installed beside this program?"))?;
     Ok(())
 }
 

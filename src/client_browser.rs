@@ -25,7 +25,7 @@ impl Client {
         if socket.as_os_str().len() > LONGEST_SOCKET_PATH {
             return Err(Error::BrokerUnavailable("the shared folder's path is too long for a socket"));
         }
-        let stream = UnixStream::connect(socket).map_err(|_| Error::BrokerUnavailable("it is not running. Open Vaulty and try again"))?;
+        let stream = UnixStream::connect(socket).map_err(|_| Error::BrokerUnavailable("it is not running. Open Vaulte and try again"))?;
         let passphrase = options.passphrase.map(|passphrase| Zeroizing::new(passphrase.to_owned()));
         // A sandbox cannot start a broker, so it can replace none.
         Ok(Self { stream, session: options.session.map(str::to_owned), passphrase, upgrade: None })

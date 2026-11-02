@@ -418,7 +418,7 @@ impl State {
     fn apply_checked(&mut self, entry: &Entry, vouched_for: bool) -> Result<(), Refusal> {
         self.revision = next_revision();
         let body = Body::decode(entry.kind, &entry.body).map_err(|error| match error {
-            Error::Newer => Refusal::Stop("written by a newer version of Vaulty"),
+            Error::Newer => Refusal::Stop("written by a newer version of Vaulte"),
             _ => Refusal::Stop("unreadable entry"),
         })?;
         let key = self.author_key(entry, &body)?;

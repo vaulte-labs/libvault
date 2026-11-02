@@ -135,7 +135,7 @@ fn sandboxed_code_with_no_broker_running_is_told_to_open_the_app() {
     let shared = shared_folder(&vault);
     vault.client().stop().unwrap();
     let error = Client::connect_shared(&shared, options(None)).unwrap_err();
-    assert!(error.to_string().contains("Open Vaulty"), "{error}");
+    assert!(error.to_string().contains("Open Vaulte"), "{error}");
 }
 
 #[test]

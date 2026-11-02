@@ -1086,5 +1086,5 @@ fn an_entry_from_a_newer_version_is_named_as_that_not_as_tampering() {
     entry.kind = 200;
     entry.signature = device.log.sign(&entry.signed_bytes()).as_ref().try_into().unwrap();
     log.push(entry);
-    assert!(forge.state().problems.iter().any(|problem| problem.reason == "written by a newer version of Vaulty"));
+    assert!(forge.state().problems.iter().any(|problem| problem.reason == "written by a newer version of Vaulte"));
 }

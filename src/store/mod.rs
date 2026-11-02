@@ -130,7 +130,7 @@ pub(crate) fn encode_archive(logs: &Logs) -> Vec<u8> {
 pub(crate) fn decode_archive(bytes: &[u8]) -> Result<Logs> {
     let mut r = Reader::new(bytes);
     if r.array::<8>()? != *ARCHIVE_MAGIC {
-        return Err(Error::Invalid("that file is not a Vaulty archive"));
+        return Err(Error::Invalid("that file is not a Vaulte archive"));
     }
     let mut logs = Logs::new();
     for _ in 0..r.u32()? {
