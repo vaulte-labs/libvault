@@ -172,12 +172,14 @@ impl Vault {
     }
 
     /// Removes a device and rotates every key. Returns the names of everything it could read,
-    /// because rotation cannot un-read what it already saw.
+    /// because rotation cannot un-read what it already saw: a server only its spaces, and an item
+    /// in several of them once.
     pub(crate) fn remove_device(&mut self, removal: &Removal, approvals: Vec<Approval>) -> Result<Vec<String>> {
         self.state.verify_roster_change(&removal.after, &removal.digest, &approvals, Some(&removal.device))?;
-        let mut exposed = Vec::new();
-        for space in self.spaces()? {
-            exposed.extend(self.items(&space.id)?.into_iter().map(|item| item.meta.name));
+        let held = self.state.spaces_held_by(&removal.device).cloned();
+        let mut exposed = BTreeMap::new();
+        for space in self.spaces()?.into_iter().filter(|space| held.as_ref().is_none_or(|held| held.contains(&space.id))) {
+            exposed.extend(self.items(&space.id)?.into_iter().map(|item| (item.id, item.meta.name)));
         }
         let recovery = self.state.recovery.clone();
         let rotation = self.rotation(&recovery, Some(removal.device))?;
@@ -189,7 +191,7 @@ impl Vault {
             approvals,
         };
         self.commit_rotation(Some(revoke), rotation)?;
-        Ok(exposed)
+        Ok(exposed.into_values().collect())
     }
 
     /// Works out adding a device without changing anything. A name already in use gets a suffix.

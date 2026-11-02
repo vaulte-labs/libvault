@@ -781,6 +781,12 @@ fn a_server_keeps_its_spaces_through_a_rotation_and_is_given_nothing_else() {
 }
 
 #[test]
+fn removing_a_server_names_only_what_its_spaces_held() {
+    let (laptop, _server) = laptop_and_agents_server();
+    assert_eq!(laptop.client().remove_device("VPS", None).unwrap(), ["DEPLOY_TOKEN"], "not BANK_PIN, which the server never held");
+}
+
+#[test]
 fn a_server_names_only_the_spaces_it_holds_for_an_item_in_several() {
     let (laptop, server) = laptop_and_agents_server();
     laptop.client().link(Some("Agents"), "DEPLOY_TOKEN", "Personal").unwrap();
