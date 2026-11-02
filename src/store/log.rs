@@ -71,11 +71,12 @@ impl Entry {
         let seq = reader.u64()?;
         let clock = reader.u64()?;
         let prev = reader.array()?;
-        let body = reader.bytes()?;
-        if body.len() > MAX_BODY {
+        // Checked before reading on: a length past the limit is damage, never a write cut short.
+        let len = reader.u32()? as usize;
+        if len > MAX_BODY {
             return Err(Error::Corrupt("record is too large"));
         }
-        let body = body.to_vec();
+        let body = reader.take(len)?.to_vec();
         let signature = reader.array()?;
         Ok(Self { kind, device, seq, clock, prev, body, signature })
     }
@@ -109,13 +110,20 @@ pub fn parse(bytes: &[u8]) -> Parsed {
                 break;
             }
             Err(error) => {
-                parsed.torn = crate::wire::ran_out(&error);
+                // A crash leaves part of one write at the end and nothing whole after it. A whole
+                // entry further on means a changed length byte, and cutting there would lose it.
+                parsed.torn = crate::wire::ran_out(&error) && !holds_an_entry(&bytes[parsed.valid_len + 1..]);
                 parsed.damaged = !parsed.torn;
                 break;
             }
         }
     }
     parsed
+}
+
+/// Whether a whole entry starts anywhere in `bytes`. Only a log that stopped parsing is searched.
+fn holds_an_entry(bytes: &[u8]) -> bool {
+    (0..bytes.len()).any(|at| bytes[at..].starts_with(&MAGIC) && Entry::decode(&mut Reader::new(&bytes[at..])).is_ok())
 }
 
 pub fn path_for(home: &Path, device: &DeviceId) -> PathBuf {
@@ -351,6 +359,19 @@ mod tests {
         assert!(parse(&bytes).damaged, "this is not a crash mid-write");
         assert!(Appender::open(&path).is_err(), "opening must not destroy what is behind the damage");
         assert_eq!(fs::read(&path).unwrap(), bytes, "the file must be left as it was");
+    }
+
+    #[test]
+    fn a_changed_length_byte_is_damage_not_a_torn_tail() {
+        let (first, second, third) = (entry(0).encode(), entry(1).encode(), entry(2).encode());
+        // The second entry's body length sits after its 68-byte header, little-endian.
+        let length = first.len() + 68;
+        for (byte, flip) in [(length + 3, 0x80), (length, 0x40)] {
+            let mut bytes = [first.clone(), second.clone(), third.clone()].concat();
+            bytes[byte] ^= flip;
+            let parsed = parse(&bytes);
+            assert!(parsed.damaged && !parsed.torn, "a later whole entry must not be cut as a torn write");
+        }
     }
 
     #[test]
