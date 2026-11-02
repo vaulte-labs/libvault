@@ -604,6 +604,27 @@ fn a_broker_takes_nothing_from_the_environment_of_whoever_started_it() {
 }
 
 #[test]
+fn a_broker_ends_once_its_vault_is_deleted() {
+    let vault = Vault::new();
+    let mut broker = std::process::Command::new(support::LVD).env("LV_HOME", &vault.home).stdin(std::process::Stdio::null()).spawn().unwrap();
+    let pid = broker.id().to_string();
+    let started = Instant::now();
+    while fs::read_to_string(vault.home.join("run/lvd.pid")).ok().as_deref() != Some(pid.as_str()) {
+        assert!(started.elapsed() < Duration::from_secs(5), "the broker never started");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    fs::remove_dir_all(&vault.home).unwrap();
+    let started = Instant::now();
+    while broker.try_wait().unwrap().is_none() {
+        if started.elapsed() > Duration::from_secs(10) {
+            broker.kill().unwrap();
+            panic!("a broker for a deleted vault kept running, with its keys");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
 fn sigterm_stops_a_broker_even_when_whatever_started_it_ignored_that() {
     let vault = Vault::new();
     // An ignored signal carries over to whatever a process starts, and `trap ''` ignores it.

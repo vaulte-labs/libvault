@@ -326,6 +326,12 @@ impl Broker {
             std::thread::sleep(Duration::from_secs(2));
             let screen_locked = self.screen_is_locked();
             let mut core = self.core();
+            // Nobody can reach a broker whose socket has gone, as when its vault was deleted, so it
+            // ends, and the keys it held go with it instead of staying in memory for good.
+            if !socket_path(&self.home).exists() {
+                core.lock();
+                std::process::exit(0);
+            }
             core.check_runs();
             // A server opens again by itself, so locking it would only end its agents' grants.
             if self.device.has_person() && core.is_due_to_lock(screen_locked, now_ms()) {
