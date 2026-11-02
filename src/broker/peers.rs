@@ -131,9 +131,9 @@ impl Broker {
         }
         channel.give_up_by(deadline);
         channel.send(&[SYNC])?;
+        let began = self.core().vault.growth.count();
         let incoming = exchange::initiate(&mut channel, &self.home)?;
-        let updated = self.take_in(incoming, accept)?;
-        self.heard_from(peer);
+        let updated = self.take_in(incoming, accept, Some((peer, began)))?;
         Ok((peer, updated))
     }
 
@@ -243,9 +243,9 @@ impl Broker {
         let peer = self.peer_id(&channel)?;
         match channel.recv(1)?.as_slice() {
             [SYNC] => {
+                let began = self.core().vault.growth.count();
                 let incoming = exchange::respond(&mut channel, &self.home)?;
-                self.take_in(incoming, None)?;
-                self.heard_from(peer);
+                self.take_in(incoming, None, Some((peer, began)))?;
                 Ok(())
             }
             [ASK] => self.answer(&mut channel, peer),

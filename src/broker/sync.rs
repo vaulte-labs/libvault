@@ -1,7 +1,13 @@
 //! When this device syncs, and with what. Every place it keeps in step with is in one table: the
 //! addresses a person gave or a beacon showed, the relays, and the backup folders. A sync goes out
 //! as soon as the logs here grow, by a write here or by taking one in, so a change travels on from
-//! device to device without waiting. Otherwise each syncs on a beat.
+//! device to device without waiting.
+//!
+//! A direct call costs nothing, so a device calls every address on each beacon and beat: one whose
+//! address changed may have no way to call back. Through a relay, which costs, a device is called
+//! only when it is due: it may lack something here, or has been quiet long enough that it may hold
+//! something this one lacks. One that cannot be reached there is tried again after a growing wait,
+//! and everyone is called when this device comes back to a relay.
 //!
 //! Folders and devices sync on two threads, because a cloud folder can stall for as long as it
 //! likes and must not hold up the devices.
@@ -30,9 +36,11 @@ pub(super) const BEACON_EVERY: Duration = Duration::from_secs(10);
 const MIN_GAP: Duration = Duration::from_secs(1);
 /// The least time between two syncs at one address, however often a beacon shows it.
 const MIN_RESYNC: Duration = Duration::from_secs(3);
-/// How long a device may go unheard before it is called through a relay. Each call costs a phone
-/// some battery and the relay some traffic, so this is slower than a local network.
-const RELAY_RESYNC: Duration = Duration::from_secs(30);
+/// How long a device may go unheard before it is called anyway, in case a change missed it.
+/// Changes go out as they happen, so this is only a backstop.
+const CATCH_UP: Duration = Duration::from_mins(15);
+/// The first wait before calling again a device that answered nowhere, doubling up to `CATCH_UP`.
+const FIRST_RETRY: Duration = Duration::from_secs(10);
 /// How often every folder is read, for what other devices wrote there.
 const FOLDER_REFRESH: Duration = Duration::from_secs(30);
 /// How a peer address names a relay rather than a device.
@@ -48,6 +56,11 @@ pub(super) struct Places {
     addresses: BTreeMap<SocketAddr, Option<Instant>>,
     /// When each device last completed a sync with this one, by the wall clock.
     pub contacts: BTreeMap<DeviceId, u64>,
+    /// How far the logs here had grown, by `Growth`'s count, when each device was last given all
+    /// of them.
+    holds: BTreeMap<DeviceId, u64>,
+    /// When each device that answered nowhere may be called again, and the wait before that.
+    retries: BTreeMap<DeviceId, (Instant, Duration)>,
     pub backups: BTreeMap<PathBuf, BackupInfo>,
 }
 
@@ -66,9 +79,34 @@ impl Places {
         self.addresses.keys().copied().collect()
     }
 
-    fn heard_within(&self, window: Duration, now: u64) -> BTreeSet<DeviceId> {
-        let window = u64::try_from(window.as_millis()).unwrap_or(u64::MAX);
-        self.contacts.iter().filter(|(_, last)| now.saturating_sub(**last) < window).map(|(device, _)| *device).collect()
+    /// Whether `device` should be called, with the logs here grown to `grown` and the wall clock at
+    /// `now`: it may lack something, or has been quiet so long it may hold something, and it is not
+    /// waiting out a failed call.
+    fn due(&self, device: &DeviceId, grown: u64, now: u64) -> bool {
+        let behind = self.holds.get(device).is_none_or(|holds| *holds < grown);
+        let quiet = self.contacts.get(device).is_none_or(|last| Duration::from_millis(now.saturating_sub(*last)) >= CATCH_UP);
+        let waiting = self.retries.get(device).is_some_and(|(next, _)| Instant::now() < *next);
+        (behind || quiet) && !waiting
+    }
+
+    /// Notes a completed sync, after which `device` holds all the logs here had grown to `holds`.
+    pub fn heard_from(&mut self, device: DeviceId, holds: u64) {
+        self.contacts.insert(device, now_ms());
+        self.holds.insert(device, holds);
+        self.retries.remove(&device);
+    }
+
+    /// Notes that `device` answered nowhere, so it waits twice as long as last time to be called.
+    fn missed(&mut self, device: DeviceId) {
+        let gap = self.retries.get(&device).map_or(FIRST_RETRY, |(_, gap)| (*gap * 2).min(CATCH_UP));
+        self.retries.insert(device, (Instant::now() + gap, gap));
+    }
+
+    /// Forgets what every device holds and every wait, so each is called once more. For coming
+    /// back to a relay, after which anything sent meanwhile may have missed this device.
+    fn call_everyone(&mut self) {
+        self.holds.clear();
+        self.retries.clear();
     }
 }
 
@@ -146,10 +184,6 @@ impl Broker {
         Ok(())
     }
 
-    pub(super) fn heard_from(&self, peer: DeviceId) {
-        self.core().places.contacts.insert(peer, now_ms());
-    }
-
     /// A route through each relay to each device not in `reached`, by the roster as it stands now.
     pub(super) fn relay_routes(&self, reached: &BTreeSet<DeviceId>) -> Vec<Route> {
         let relays = self.relays();
@@ -210,11 +244,11 @@ impl Broker {
                     }
                 }
                 self.sync_given_addresses();
-                self.sync_through_relays();
+                self.sync_through_relays(BTreeSet::new());
             }
             let until_beat = beat.map_or(Duration::ZERO, |beat| BEACON_EVERY.saturating_sub(beat.elapsed()));
             if paced.grew_within(until_beat) {
-                self.sync_peers();
+                self.push();
             }
         }
     }
@@ -229,16 +263,42 @@ impl Broker {
         }
     }
 
-    /// Calls each device not heard from lately through the relays, for what it holds.
-    fn sync_through_relays(&self) {
-        let mut reached = self.core().places.heard_within(RELAY_RESYNC, now_ms());
+    /// Sends a change out: to every address, then through the relays to each device that is due
+    /// and was not reached there.
+    fn push(&self) {
+        let addresses = self.core().places.addresses();
+        let reached = addresses.into_iter().filter_map(|address| self.sync_with(&Route::Direct(address), None).ok().map(|(peer, _)| peer)).collect();
+        self.sync_through_relays(reached);
+    }
+
+    /// Calls through the relays each device that is due and not in `reached`. One that answers at
+    /// none waits longer before the next call.
+    fn sync_through_relays(&self, mut reached: BTreeSet<DeviceId>) {
+        let due: BTreeSet<DeviceId> = {
+            let core = self.core();
+            let (grown, now) = (core.vault.growth.count(), now_ms());
+            core.vault
+                .peer_sync_keys()
+                .iter()
+                .filter_map(|sync| core.vault.active_peer(sync))
+                .filter(|device| core.places.due(device, grown, now))
+                .collect()
+        };
+        let mut called = BTreeSet::new();
         for route in self.relay_routes(&reached) {
             if let Route::Relay { device, .. } = &route
+                && due.contains(device)
                 && !reached.contains(device)
-                && let Ok((peer, _)) = self.sync_with(&route, None)
             {
-                reached.insert(peer);
+                called.insert(*device);
+                if let Ok((peer, _)) = self.sync_with(&route, None) {
+                    reached.insert(peer);
+                }
             }
+        }
+        let mut core = self.core();
+        for device in called.difference(&reached) {
+            core.places.missed(*device);
         }
     }
 
@@ -270,11 +330,13 @@ impl Broker {
     }
 
     /// Stays at a relay for other devices to call in, under tags renewed on every beat, coming
-    /// back whenever the connection drops.
+    /// back whenever the connection drops. Calls to this device while it was away found nobody, so
+    /// on coming back it calls everyone.
     fn wait_at_relay(self: &Arc<Self>, relay: &str, slots: &Arc<AtomicUsize>) {
         loop {
             let _ = (|| -> Result<()> {
                 let mut waiting = relay::Waiting::open(relay, &self.neighbours()?.relay_tags(), &self.relay_pass())?;
+                self.core().places.call_everyone();
                 let mut renewed = Instant::now();
                 loop {
                     if renewed.elapsed() >= BEACON_EVERY {
@@ -297,7 +359,7 @@ impl Broker {
             return Err(Error::Invalid("the folder is not available"));
         }
         let folder = vault_folder(root, self.core().vault.vault_id());
-        self.take_in(read_logs(&folder)?, None)?;
+        self.take_in(read_logs(&folder)?, None, None)?;
         let settled = self.core().vault.logs_removals_kept();
         write_logs(&folder, &self.home, &settled)
     }
@@ -363,11 +425,23 @@ mod tests {
     }
 
     #[test]
-    fn only_devices_heard_within_the_window_count_as_reached() {
+    fn a_device_is_called_when_it_may_lack_something_or_has_been_quiet_long() {
         let mut places = Places::default();
-        let (recent, stale) = (DeviceId::from([1; 16]), DeviceId::from([2; 16]));
-        places.contacts.insert(recent, 100_000);
-        places.contacts.insert(stale, 100_000 - 30_000);
-        assert_eq!(places.heard_within(RELAY_RESYNC, 100_000), BTreeSet::from([recent]));
+        let device = DeviceId::from([1; 16]);
+        let now = now_ms();
+        assert!(places.due(&device, 0, now), "never synced since this device started");
+
+        places.heard_from(device, 5);
+        assert!(!places.due(&device, 5, now), "holds everything and was just heard");
+        assert!(places.due(&device, 6, now), "the logs here grew since");
+        let catch_up = u64::try_from(CATCH_UP.as_millis()).unwrap();
+        assert!(places.due(&device, 5, now + catch_up), "quiet long enough to have something");
+
+        places.missed(device);
+        assert!(!places.due(&device, 6, now), "waiting out a failed call");
+        places.missed(device);
+        assert_eq!(places.retries[&device].1, FIRST_RETRY * 2, "each miss waits twice as long");
+        places.call_everyone();
+        assert!(places.due(&device, 5, now), "back at a relay, everyone is called");
     }
 }

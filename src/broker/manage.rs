@@ -8,6 +8,7 @@ use super::asks::{Ask, export_digest, what_a_server_holds};
 use super::policy::{Action, Caller, Verdict, decide};
 use super::{Broker, Connection};
 use crate::crypto::Hash;
+use crate::ids::DeviceId;
 use crate::net::pair;
 use crate::protocol::{Request, Response};
 use crate::record::{Approval, Approver};
@@ -110,7 +111,7 @@ impl Broker {
                 };
                 let mut devices_updated = 0;
                 for root in roots {
-                    devices_updated += self.take_in(read_logs(&vault_folder(&root, vault))?, Some(&accept))?;
+                    devices_updated += self.take_in(read_logs(&vault_folder(&root, vault))?, Some(&accept), None)?;
                 }
                 devices_updated += self.settle_with_peers(&accept);
                 Ok(Response::Settled { devices_updated })
@@ -231,10 +232,18 @@ impl Broker {
         Ok(Response::Paired { name: enrollment.name })
     }
 
-    /// Merges logs, then locks if keys changed, or repairs with the keys already held.
-    pub(super) fn take_in(&self, logs: Logs, accept: Option<&RecoveryKey>) -> Result<usize> {
+    /// Merges logs, then locks if keys changed, or repairs with the keys already held. With `from`,
+    /// they are what a device sent in an exchange, begun with the logs here grown to that count.
+    pub(super) fn take_in(&self, logs: Logs, accept: Option<&RecoveryKey>, from: Option<(DeviceId, u64)>) -> Result<usize> {
         let mut core = self.core();
+        let unchanged = from.is_some_and(|(_, began)| core.vault.growth.count() == began);
         let merged = core.vault.merge_logs(logs, accept)?;
+        if let Some((device, began)) = from {
+            // The device was sent everything here as of `began`, and holds what it sent. The logs
+            // grow only under the core's lock, so an unchanged count means it now holds them all.
+            let holds = if unchanged { core.vault.growth.count() } else { began };
+            core.places.heard_from(device, holds);
+        }
         if merged.must_lock {
             core.lock();
         } else {
