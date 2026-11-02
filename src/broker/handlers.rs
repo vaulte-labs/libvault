@@ -1,19 +1,17 @@
 //! Carries out requests. What is allowed is decided in `policy`; this file only resolves names,
 //! asks that table, and acts.
 
-use std::collections::HashMap;
-
 use super::grants::Grant;
+use super::linking::shown;
 use super::policy::{Action, Caller, Verdict, decide};
 use super::{Broker, Connection};
 use crate::device::software::present;
 use crate::expiry;
 use crate::ids::SpaceId;
 use crate::item::{self, Meta, Secret};
-use crate::items::Summary;
 use crate::protocol::{Envelope, Request, Response};
 use crate::store::log::now_ms;
-use crate::view::{ContactInfo, GrantInfo, HistoryInfo, ItemInfo, StatusInfo};
+use crate::view::{ContactInfo, GrantInfo, HistoryInfo, StatusInfo};
 use crate::{Error, ErrorCode, Result, Vault};
 
 pub(super) const MAX_GRANT_SECONDS: u64 = 24 * 60 * 60;
@@ -32,22 +30,6 @@ pub(super) fn resolve_space(vault: &Vault, caller: &Caller, name: Option<&str>) 
         }
         (Caller::Anyone | Caller::App, name) => Ok(vault.space(name.unwrap_or(crate::FIRST_SPACE))?.id),
     }
-}
-
-/// Shows an item listed in the space named `space`, with the other spaces it is in and its home
-/// when that is another. Built once per request, so a list costs one pass over the vault rather
-/// than one per item.
-fn shown(vault: &Vault, caller: &Caller) -> Result<impl Fn(&str, Summary) -> ItemInfo> {
-    // A session sees one space, so the others an item is in are none of its business.
-    let copies = if matches!(caller, Caller::Session(_)) { HashMap::new() } else { vault.copies() };
-    // Only spaces this device can open, which on a server are the ones it holds.
-    let names: HashMap<SpaceId, String> = vault.spaces()?.into_iter().map(|space| (space.id, space.name)).collect();
-    Ok(move |space: &str, item: Summary| {
-        let known: Vec<&SpaceId> = copies.get(&item.id).into_iter().flatten().filter(|copy| names.contains_key(copy)).collect();
-        let linked_from = known.first().filter(|home| **home != &item.space).map(|home| names[*home].clone());
-        let also_in = known.into_iter().filter(|other| **other != item.space).map(|other| names[other].clone()).collect();
-        ItemInfo { space: space.to_owned(), meta: item.meta, also_in, linked_from }
-    })
 }
 
 pub(super) fn space_name(vault: &Vault, id: &SpaceId) -> String {
@@ -233,24 +215,8 @@ impl Broker {
                 Ok(Response::Ok)
             }
             Request::Edit { space, name, meta, secret } => self.edit(caller, space.as_deref(), &name, meta, secret),
-            Request::Link { space, name, to } => {
-                let (from, item) = self.locate(caller, space.as_deref(), &name)?;
-                let to_id = resolve_space(&self.unlocked()?.vault, caller, Some(&to))?;
-                self.check(caller, Action::LinkItem { name: &name, to: &to })?;
-                let mut core = self.open_core()?;
-                core.vault.link(&from, &item.id, &to_id)?;
-                core.vault.record("link", &name, caller.name())?;
-                Ok(Response::Ok)
-            }
-            Request::Move { space, name, to } => {
-                let (from, item) = self.locate(caller, space.as_deref(), &name)?;
-                let to_id = resolve_space(&self.unlocked()?.vault, caller, Some(&to))?;
-                self.check(caller, Action::MoveItem { name: &name, to: &to })?;
-                let mut core = self.open_core()?;
-                core.vault.move_item(&from, &item.id, &to_id)?;
-                core.vault.record("move", &name, caller.name())?;
-                Ok(Response::Ok)
-            }
+            Request::Link { space, name, to } => self.copy_to(caller, space.as_deref(), &name, &to, false),
+            Request::Move { space, name, to } => self.copy_to(caller, space.as_deref(), &name, &to, true),
             Request::Reveal { space, name } => {
                 let (id, item) = self.locate(caller, space.as_deref(), &name)?;
                 let target = space_name(&self.core().vault, &id);

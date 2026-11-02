@@ -15,6 +15,7 @@ mod codes;
 mod fill_requests;
 mod grants;
 mod handlers;
+mod linking;
 mod login;
 mod manage;
 mod passkeys;
