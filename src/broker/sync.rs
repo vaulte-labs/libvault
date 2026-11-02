@@ -434,8 +434,9 @@ mod tests {
         places.heard_from(device, 5);
         assert!(!places.due(&device, 5, now), "holds everything and was just heard");
         assert!(places.due(&device, 6, now), "the logs here grew since");
-        let catch_up = u64::try_from(CATCH_UP.as_millis()).unwrap();
-        assert!(places.due(&device, 5, now + catch_up), "quiet long enough to have something");
+        let (heard, catch_up) = (places.contacts[&device], u64::try_from(CATCH_UP.as_millis()).unwrap());
+        assert!(!places.due(&device, 5, heard + catch_up - 1), "not yet quiet long enough");
+        assert!(places.due(&device, 5, heard + catch_up), "quiet long enough to have something");
 
         places.missed(device);
         assert!(!places.due(&device, 6, now), "waiting out a failed call");
