@@ -72,7 +72,7 @@ impl Vault {
         }
         let key = self.writing_key(space)?;
         let secret = Secret::Icon { png: STANDARD.encode(png) };
-        let body = self.put_body(&key, *space, ItemId::random(), BatchId::ICONS, &Meta::new(Kind::Icon, name), &secret)?;
+        let body = self.put_body(&key, *space, ItemId::random(), BatchId::UNASKED, &Meta::new(Kind::Icon, name), &secret)?;
         self.commit(&[body])
     }
 }

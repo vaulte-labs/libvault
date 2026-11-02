@@ -90,7 +90,7 @@ fn one_undo_brings_back_items_deleted_together_with_their_secrets() {
     assert!(vault.find(&space.id, "KEY").is_err());
     assert!(vault.find(&space.id, "OTHER").is_err());
 
-    assert_eq!(vault.undo().unwrap(), 2);
+    assert_eq!(vault.undo().unwrap(), ["KEY", "OTHER"]);
     assert_eq!(vault.secret(&space.id, &id).unwrap(), env("value"));
     assert_eq!(vault.secret(&space.id, &other).unwrap(), env("other"));
 }
@@ -113,8 +113,39 @@ fn undo_removes_a_whole_batch_at_once() {
     let batch: Vec<_> = (0..5).map(|n| (Meta::new(Kind::Env, format!("KEY_{n}")), env("v"))).collect();
     vault.add_many(&space.id, &batch).unwrap();
     assert_eq!(vault.items(&space.id).unwrap().len(), 5);
-    assert_eq!(vault.undo().unwrap(), 5);
+    assert_eq!(vault.undo().unwrap().len(), 5);
     assert_eq!(vault.items(&space.id).unwrap(), [] as [crate::items::Summary; 0]);
+}
+
+#[test]
+fn each_undo_goes_one_change_further_back_and_never_undoes_itself() {
+    let (_dir, mut vault, _) = new_vault();
+    let space = vault.space(FIRST_SPACE).unwrap();
+    let a = vault.add(&space.id, Meta::new(Kind::Env, "A"), &env("a")).unwrap();
+    vault.add(&space.id, Meta::new(Kind::Env, "B"), &env("b")).unwrap();
+    vault.replace(&space.id, &a, &Meta::new(Kind::Env, "A"), &env("a2")).unwrap();
+
+    assert_eq!(vault.undo().unwrap(), ["A"]);
+    assert_eq!(vault.secret(&space.id, &a).unwrap(), env("a"));
+    assert_eq!(vault.undo().unwrap(), ["B"]);
+    assert!(vault.find(&space.id, "B").is_err());
+    assert_eq!(vault.undo().unwrap(), ["A"]);
+    assert!(vault.find(&space.id, "A").is_err());
+    assert!(matches!(vault.undo(), Err(Error::NotFound(_))));
+}
+
+#[test]
+fn undo_skips_what_it_already_undid_after_a_new_change() {
+    let (_dir, mut vault, _) = new_vault();
+    let space = vault.space(FIRST_SPACE).unwrap();
+    vault.add(&space.id, Meta::new(Kind::Env, "A"), &env("a")).unwrap();
+    vault.add(&space.id, Meta::new(Kind::Env, "B"), &env("b")).unwrap();
+    vault.undo().unwrap();
+    vault.add(&space.id, Meta::new(Kind::Env, "C"), &env("c")).unwrap();
+
+    assert_eq!(vault.undo().unwrap(), ["C"]);
+    assert_eq!(vault.undo().unwrap(), ["A"]);
+    assert!(vault.find(&space.id, "B").is_err());
 }
 
 #[test]

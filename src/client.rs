@@ -200,10 +200,11 @@ impl Client {
         self.call(Request::Remove { items }).map(drop)
     }
 
-    /// Reverses this device's last change, returning how many items changed.
-    pub fn undo(&mut self) -> Result<usize> {
+    /// Reverses this device's last change not undone yet, returning the names of the items it
+    /// changed back. Each call goes one change further back.
+    pub fn undo(&mut self) -> Result<Vec<String>> {
         match self.call(Request::Undo)? {
-            Response::Undone { count } => Ok(count),
+            Response::Undone { names } => Ok(names),
             _ => Err(UNEXPECTED),
         }
     }

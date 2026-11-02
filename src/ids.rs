@@ -41,9 +41,16 @@ id! {
 }
 
 impl BatchId {
-    /// The batch every icon is written in, which undo passes over. Nobody asked for an icon, so
-    /// nobody should undo one by accident. Random ids never land on this.
-    pub(crate) const ICONS: Self = Self([0; 16]);
+    /// The batch for writes nobody asked for, icons and rescued items, which undo passes over so
+    /// nobody undoes one by accident. Random ids never land on this.
+    pub(crate) const UNASKED: Self = Self([0; 16]);
+
+    /// The batch that undoes `batch`. Derived rather than random, so the log alone says which
+    /// changes are undone and undo can walk back one change after another.
+    pub(crate) fn undoing(batch: Self) -> Self {
+        let hash = crate::crypto::hash(&[b"vaulte undo", &batch.0]);
+        Self(hash[..16].try_into().expect("a hash is longer than an id"))
+    }
 }
 
 /// One generation of a rotating key, such as an epoch or a version of a space. The author is part

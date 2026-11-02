@@ -1,5 +1,7 @@
 //! Reading and changing items. What lists show is in `listing`.
 
+use std::collections::{HashMap, HashSet};
+
 use crate::binding::{Binding, Part};
 use crate::crypto::{self, Key};
 use crate::ids::{BatchId, DeviceId, Generation, ItemId, SpaceId};
@@ -175,25 +177,45 @@ impl Vault {
         self.write_everywhere(space, id, &meta, &secret)
     }
 
-    /// Reverses this device's most recent batch. Returns how many items changed.
-    pub fn undo(&mut self) -> Result<usize> {
-        let batch = self
-            .state
-            .items
-            .values()
-            .flatten()
-            .filter(|version| version.device == self.me && version.batch != BatchId::ICONS)
-            .max_by_key(|version| version.clock)
-            .map(|version| version.batch)
+    /// Reverses this device's most recent change that is not undone yet, so each undo goes one
+    /// change further back. Returns the names of the items it changed back. An item changed again
+    /// since is left as it is.
+    pub fn undo(&mut self) -> Result<Vec<String>> {
+        let mut newest: HashMap<BatchId, u64> = HashMap::new();
+        for version in self.state.items.values().flatten() {
+            if version.device == self.me && version.batch != BatchId::UNASKED {
+                let clock = newest.entry(version.batch).or_default();
+                *clock = (*clock).max(version.clock);
+            }
+        }
+        let undoes: HashMap<BatchId, BatchId> = newest.keys().map(|batch| (BatchId::undoing(*batch), *batch)).collect();
+        let mut batches: Vec<_> = newest.into_iter().collect();
+        batches.sort_unstable_by_key(|(_, clock)| std::cmp::Reverse(*clock));
+        let mut undone = HashSet::new();
+        let batch = batches
+            .into_iter()
+            .map(|(batch, _)| batch)
+            .find(|batch| match undoes.get(batch) {
+                Some(earlier) => {
+                    undone.insert(*earlier);
+                    false
+                }
+                None => !undone.contains(batch),
+            })
             .ok_or(Error::NotFound("nothing to undo".to_owned()))?;
 
-        let undo_batch = BatchId::random();
+        let undo_batch = BatchId::undoing(batch);
         let mut bodies = Vec::new();
+        let mut names = Vec::new();
         for ((space, item), versions) in &self.state.items {
             let Some(index) = versions.iter().rposition(|version| version.batch == batch) else { continue };
-            if index + 1 != versions.len() {
+            // Changes since that were undone, and their undoing, leave it as this batch left it.
+            if !versions[index + 1..].iter().all(|version| undone.contains(&version.batch) || undoes.contains_key(&version.batch)) {
                 continue;
             }
+            let mut key_for = |version| self.space_key(space, version);
+            let meta = self.meta_of(&mut key_for, space, item, versions).or_else(|| self.meta_of(&mut key_for, space, item, &versions[..index]));
+            names.extend(meta.map(|meta| meta.name));
             bodies.push(match versions[..index].last() {
                 Some(Version { change: Change::Put { version, meta, secret }, .. }) => {
                     Body::ItemPut { space: *space, item: *item, version: *version, batch: undo_batch, meta: meta.clone(), secret: secret.clone() }
@@ -201,7 +223,12 @@ impl Vault {
                 _ => Body::ItemDelete { space: *space, item: *item, batch: undo_batch },
             });
         }
+        if bodies.is_empty() {
+            return Err(Error::NotFound("nothing to undo: what you changed last has been changed again since".to_owned()));
+        }
         self.commit(&bodies)?;
-        Ok(bodies.len())
+        names.sort_unstable();
+        names.dedup();
+        Ok(names)
     }
 }

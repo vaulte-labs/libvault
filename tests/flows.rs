@@ -379,7 +379,7 @@ fn importing_handles_duplicates_and_undoes_as_one() {
     assert_eq!(revealed(&mut client, None, "CLASH"), "existing");
     assert_eq!(revealed(&mut client, None, "CLASH_2"), "different");
 
-    assert_eq!(client.undo().unwrap(), 2);
+    assert_eq!(client.undo().unwrap(), ["CLASH_2", "NEW"]);
     assert_eq!(code(client.item(None, "NEW")), ErrorCode::NotFound);
     assert_eq!(revealed(&mut client, None, "CLASH"), "existing");
 }

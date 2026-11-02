@@ -39,7 +39,7 @@ impl Vault {
                 self.restore_space(space, &name)?;
             }
             let key = self.newest_space_key(&space)?;
-            let body = self.put_body(&key, space, item, BatchId::random(), &meta, &secret)?;
+            let body = self.put_body(&key, space, item, BatchId::UNASKED, &meta, &secret)?;
             self.commit(&[body])?;
         }
         Ok(())

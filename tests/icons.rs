@@ -104,7 +104,7 @@ fn undo_passes_over_an_icon_to_what_the_person_did() {
     login(&vault, "github.com");
     let mut client = unlocked(&vault);
     client.save_icon(None, SITE, &png(7)).unwrap();
-    assert_eq!(client.undo().unwrap(), 1);
+    assert_eq!(client.undo().unwrap(), ["github.com"]);
     assert_eq!(code(client.item(None, "github.com")), ErrorCode::NotFound, "the login went");
     assert_eq!(client.icon(None, SITE).unwrap(), Some(drawn(7)), "the icon did not");
 }

@@ -172,9 +172,9 @@ impl Broker {
                 drop(self.unlocked()?);
                 self.check(caller, Action::Undo)?;
                 let mut core = self.open_core()?;
-                let count = core.vault.undo()?;
-                core.vault.record("undo", "", caller.name())?;
-                Ok(Response::Undone { count })
+                let names = core.vault.undo()?;
+                core.vault.record("undo", &names.join(", "), caller.name())?;
+                Ok(Response::Undone { names })
             }
             Request::History { space, name } => {
                 self.check(caller, Action::Read)?;

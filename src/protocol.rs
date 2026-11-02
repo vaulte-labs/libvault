@@ -347,7 +347,7 @@ pub enum Response {
     Icon { png: Option<Vec<u8>> },
     Granted { token: String, id: String, seconds: u64 },
     Grants { grants: Vec<GrantInfo> },
-    Undone { count: usize },
+    Undone { names: Vec<String> },
     Devices { devices: Vec<DeviceInfo> },
     Removed { exposed: Vec<String> },
     Verified(BackupReport),
