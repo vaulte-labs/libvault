@@ -149,9 +149,9 @@ pub enum Request {
         space: Option<String>,
         items: Vec<(Meta, Secret)>,
     },
+    /// Each item by its space and name, removed as one change.
     Remove {
-        space: Option<String>,
-        name: String,
+        items: Vec<(Option<String>, String)>,
     },
     Undo,
     History {

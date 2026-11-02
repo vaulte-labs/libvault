@@ -46,8 +46,8 @@ pub(super) enum Action<'a> {
         name: &'a str,
         to: &'a str,
     },
-    DeleteItem {
-        name: &'a str,
+    DeleteItems {
+        names: &'a [&'a str],
     },
     Undo,
     Reveal {
@@ -187,7 +187,7 @@ impl Action<'_> {
                 | Self::Code { .. }
                 | Self::Codes
                 | Self::ReplaceItem { .. }
-                | Self::DeleteItem { .. }
+                | Self::DeleteItems { .. }
                 | Self::Undo
         )
     }
@@ -208,7 +208,7 @@ fn verdict(caller: &Caller, action: Action<'_>) -> Verdict {
         Action::Read | Action::CreateItem => Verdict::Allow,
         // A grant covers using secrets. It never covers changing or reading them.
         Action::ReplaceItem { name } => Verdict::Touch(format!("replace {}", sanitize(name))),
-        Action::DeleteItem { name } => Verdict::Touch(format!("delete {}", sanitize(name))),
+        Action::DeleteItems { names } => Verdict::Touch(format!("delete {}", listed(names))),
         Action::LinkItem { name, to } => people_only(
             caller,
             "a session cannot show an item in another space",
@@ -312,7 +312,7 @@ mod tests {
     fn nothing_that_exposes_or_changes_a_secret_is_free_for_anyone() {
         let sensitive = [
             Action::ReplaceItem { name: "KEY" },
-            Action::DeleteItem { name: "KEY" },
+            Action::DeleteItems { names: &["KEY"] },
             Action::Undo,
             Action::Reveal { name: "KEY", space: "a" },
             Action::AllowHost { name: "KEY", host: "evil.example" },
@@ -331,7 +331,7 @@ mod tests {
             Action::Fill { name: "x", origin: "x.example" },
             Action::Code { name: "x", space: "a" },
             Action::ReplaceItem { name: "KEY" },
-            Action::DeleteItem { name: "KEY" },
+            Action::DeleteItems { names: &["KEY"] },
             Action::Undo,
         ];
         for action in everyday {

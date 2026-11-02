@@ -81,16 +81,18 @@ fn a_taken_name_is_refused_rather_than_overwritten() {
 }
 
 #[test]
-fn undo_brings_back_a_deleted_item_with_its_secret() {
+fn one_undo_brings_back_items_deleted_together_with_their_secrets() {
     let (_dir, mut vault, _) = new_vault();
     let space = vault.space(FIRST_SPACE).unwrap();
     let id = vault.add(&space.id, Meta::new(Kind::Env, "KEY"), &env("value")).unwrap();
-    vault.remove(&space.id, &id).unwrap();
+    let other = vault.add(&space.id, Meta::new(Kind::Env, "OTHER"), &env("other")).unwrap();
+    vault.remove(&[(space.id, id), (space.id, other)]).unwrap();
     assert!(vault.find(&space.id, "KEY").is_err());
+    assert!(vault.find(&space.id, "OTHER").is_err());
 
-    assert_eq!(vault.undo().unwrap(), 1);
+    assert_eq!(vault.undo().unwrap(), 2);
     assert_eq!(vault.secret(&space.id, &id).unwrap(), env("value"));
-    assert!(vault.find(&space.id, "KEY").is_ok());
+    assert_eq!(vault.secret(&space.id, &other).unwrap(), env("other"));
 }
 
 #[test]

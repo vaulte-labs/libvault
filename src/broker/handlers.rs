@@ -172,12 +172,18 @@ impl Broker {
             }
             Request::Add { space, meta, secret, replace } => self.add(caller, space.as_deref(), meta, &secret, replace),
             Request::Import { space, items } => self.import(caller, space.as_deref(), items),
-            Request::Remove { space, name } => {
-                let (id, item) = self.locate(caller, space.as_deref(), &name)?;
-                self.check(caller, Action::DeleteItem { name: &name })?;
+            Request::Remove { items } => {
+                if items.is_empty() {
+                    return Err(Error::Invalid("name an item to delete"));
+                }
+                let located = items.iter().map(|(space, name)| self.locate(caller, space.as_deref(), name)).collect::<Result<Vec<_>>>()?;
+                let names: Vec<&str> = items.iter().map(|(_, name)| name.as_str()).collect();
+                self.check(caller, Action::DeleteItems { names: &names })?;
                 let mut core = self.open_core()?;
-                core.vault.remove(&id, &item.id)?;
-                core.vault.record("delete", &name, caller.name())?;
+                core.vault.remove(&located.iter().map(|(space, item)| (*space, item.id)).collect::<Vec<_>>())?;
+                for name in names {
+                    core.vault.record("delete", name, caller.name())?;
+                }
                 Ok(Response::Ok)
             }
             Request::Undo => {

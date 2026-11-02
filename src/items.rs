@@ -108,11 +108,16 @@ impl Vault {
         self.write_everywhere(space, id, meta, secret)
     }
 
-    /// Deletes an item from one space. A copy in another space stays. It stays in history, and
-    /// `undo` brings it back.
-    pub fn remove(&mut self, space: &SpaceId, id: &ItemId) -> Result<()> {
-        self.require(space, id)?;
-        self.commit(&[Body::ItemDelete { space: *space, item: *id, batch: BatchId::random() }])
+    /// Deletes items, each from one space, as one change. A copy in another space stays. They stay
+    /// in history, and one `undo` brings them all back.
+    pub fn remove(&mut self, items: &[(SpaceId, ItemId)]) -> Result<()> {
+        let batch = BatchId::random();
+        let mut bodies = Vec::new();
+        for (space, id) in items {
+            self.require(space, id)?;
+            bodies.push(Body::ItemDelete { space: *space, item: *id, batch });
+        }
+        self.commit(&bodies)
     }
 
     /// Decrypts a secret. Callers are responsible for who gets to see it.

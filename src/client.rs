@@ -191,7 +191,13 @@ impl Client {
     }
 
     pub fn remove(&mut self, space: Option<&str>, name: &str) -> Result<()> {
-        self.call(Request::Remove { space: space.map(str::to_owned), name: name.to_owned() }).map(drop)
+        self.remove_all(&[(space, name)])
+    }
+
+    /// Removes each item, by its space and name, as one change that one `undo` reverses.
+    pub fn remove_all(&mut self, items: &[(Option<&str>, &str)]) -> Result<()> {
+        let items = items.iter().map(|(space, name)| (space.map(str::to_owned), (*name).to_owned())).collect();
+        self.call(Request::Remove { items }).map(drop)
     }
 
     /// Reverses this device's last change, returning how many items changed.

@@ -59,7 +59,7 @@ fn rows_stay_true_through_every_kind_of_change() {
         let existing = vault.items(&space).unwrap();
         let pick = (!existing.is_empty()).then(|| existing[next(existing.len())].id);
         match (next(7), pick) {
-            (0, Some(id)) => vault.remove(&space, &id).unwrap(),
+            (0, Some(id)) => vault.remove(&[(space, id)]).unwrap(),
             (1, Some(id)) => vault.replace(&space, &id, &meta(&format!("renamed-{made}")), &env("new")).unwrap(),
             (2, _) if vault.undo().is_err() => {}
             (3, _) => {
@@ -93,7 +93,7 @@ fn only_the_first_read_opens_everything() {
         "only the new item"
     );
     let id = vault.find(&space, "ONE_MORE").unwrap().id;
-    assert_eq!(opens(|| vault.remove(&space, &id).unwrap()), 2, "to see that it exists, and to reread its row");
+    assert_eq!(opens(|| vault.remove(&[(space, id)]).unwrap()), 2, "to see that it exists, and to reread its row");
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn a_change_made_without_reading_first_does_not_keep_rows_from_another_state() {
     vault.state = current;
 
     // Removing reads the state, not the rows, so the rows from before are still stale here.
-    vault.remove(&space, &gone).unwrap();
+    vault.remove(&[(space, gone)]).unwrap();
     assert!(vault.find(&space, "LATER").is_ok());
     assert_rows_are_true(&vault, &space);
 }
