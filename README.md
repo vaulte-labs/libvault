@@ -16,7 +16,7 @@ an agent ever reading one.
   you allowed, an agent's browser is signed in by a separate one that hands back only cookies, and
   reading a value always takes a fresh touch.
 - **Sync without a server.** Devices pair over Noise and exchange append-only, signed logs on the
-  local network. Across networks, a relay joins them and only ever sees ciphertext.
+  local network. Across networks, Vaulte's hosted relay joins them and only ever sees ciphertext.
 
 Every interface, from the `vlt` CLI to the Mac app, browser extension and SDKs, is a thin client of
 this library, so no interface can skip an approval.
