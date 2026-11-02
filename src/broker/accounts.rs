@@ -25,6 +25,8 @@ use crate::{Error, Result, crypto};
 /// The account service Vaulte runs, and the root key that vouches for its passes.
 const HOSTED_ISSUER: &str = "https://vaulte-accounts.caeser.workers.dev";
 const HOSTED_ROOT: &str = "7b05bb2bb80b90172d4d39ddc9904c438b0a32ab16e02958280c0aeb1c080a30";
+/// The relay Vaulte hosts, which every device with an account from Vaulte's service syncs through.
+const HOSTED_RELAY: &str = "relay:vaulte-relay.fly.dev:443";
 
 const ACCOUNT_FILE: &str = "relay-account.json";
 const PASS_FILE: &str = "relay-pass";
@@ -67,6 +69,12 @@ fn issuer_or_hosted(issuer: Option<RelayIssuer>) -> RelayIssuer {
 }
 
 impl Broker {
+    /// Syncs through Vaulte's relay once the account is from Vaulte's service, so every app that
+    /// subscribes gets the relay it paid for without having to know where it is.
+    fn use_hosted_relay(&self, account: &Account) -> Result<()> {
+        if account.issuer == HOSTED_ISSUER { self.add_place(HOSTED_RELAY) } else { Ok(()) }
+    }
+
     /// Where to pay, with an account made first if this device has none. The number is the
     /// person's to keep: it is the account, and it names nobody.
     pub(super) fn relay_subscribe(&self, caller: &Caller, email: Option<&str>, issuer: Option<RelayIssuer>) -> Result<Response> {
@@ -82,8 +90,19 @@ impl Broker {
             account.write(&self.home)?;
             account
         };
+        self.use_hosted_relay(&account)?;
         let checkout = self.ask_issuer(&account.issuer, "/checkout", Some(json!({ "account": account.number })))?;
         let url = checkout["url"].as_str().ok_or(BAD_REPLY)?.to_owned();
+        Ok(Response::Checkout { account: account.number, url })
+    }
+
+    /// Stripe's page for the account this device uses, where its person cancels, changes their
+    /// card or gets invoices.
+    pub(super) fn relay_billing(&self, caller: &Caller) -> Result<Response> {
+        self.check(caller, Action::ManageGrants)?;
+        let account = Account::read(&self.home).ok_or_else(|| Error::NotFound("a relay account on this device".to_owned()))?;
+        let page = self.ask_issuer(&account.issuer, "/portal", Some(json!({ "account": account.number })))?;
+        let url = page["url"].as_str().ok_or(BAD_REPLY)?.to_owned();
         Ok(Response::Checkout { account: account.number, url })
     }
 
@@ -94,7 +113,9 @@ impl Broker {
             return Err(Error::Invalid("an account number is sixteen digits"));
         }
         let RelayIssuer { url, root } = issuer_or_hosted(issuer);
-        Account { issuer: url, number: number.to_owned(), root }.write(&self.home)?;
+        let account = Account { issuer: url, number: number.to_owned(), root };
+        account.write(&self.home)?;
+        self.use_hosted_relay(&account)?;
         let _ = std::fs::remove_file(self.home.join("local").join(PASS_FILE));
         if let Ok(mut last) = LAST_TRY.lock() {
             *last = None;

@@ -79,6 +79,7 @@ fn answer(stream: TcpStream, root: &Ed25519KeyPair, keys: &KeyPairSha384PSSRando
         }
         "/status" => (200, json!({ "paid_until": 4_000_000_000_u64 })),
         "/checkout" => (200, json!({ "url": "https://checkout.example/pay" })),
+        "/portal" => (200, json!({ "url": "https://billing.example/manage" })),
         _ => (404, json!({})),
     };
     let reply = reply.to_string();

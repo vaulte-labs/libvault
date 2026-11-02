@@ -70,6 +70,15 @@ impl Client {
         self.call(Request::RelayAccount { number: number.to_owned(), issuer }).map(drop)
     }
 
+    /// Stripe's page for this device's relay account, where its person cancels, changes their card
+    /// or gets invoices.
+    pub fn relay_billing(&mut self) -> Result<String> {
+        match self.call(Request::RelayBilling)? {
+            Response::Checkout { url, .. } => Ok(url),
+            _ => Err(UNEXPECTED),
+        }
+    }
+
     /// The account this device uses for a relay, if any, and until when it is paid, in seconds
     /// since 1970, when the account service could be asked.
     pub fn relay_status(&mut self) -> Result<Option<(String, Option<u64>)>> {

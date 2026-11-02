@@ -330,6 +330,8 @@ pub enum Request {
         issuer: Option<RelayIssuer>,
     },
     RelayStatus,
+    /// The page where the person cancels, changes their card or gets invoices.
+    RelayBilling,
 }
 
 /// An account service other than the one Vaulte runs, for a relay someone runs themselves.

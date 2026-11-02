@@ -852,3 +852,12 @@ fn subscribing_makes_one_account_and_says_where_to_pay() {
     assert_eq!(vault.client().relay_status().unwrap(), Some((account, Some(4_000_000_000))));
     assert_eq!(code(vault.client().use_relay_account("1234", None)), ErrorCode::Error);
 }
+
+#[test]
+fn the_billing_page_is_for_the_account_this_device_uses() {
+    let issuer = issuer::Issuer::start();
+    let vault = Vault::new();
+    assert_eq!(code(vault.client().relay_billing()), ErrorCode::NotFound, "no account, no page");
+    vault.client().relay_subscribe(None, Some(issuer.issuer())).unwrap();
+    assert_eq!(vault.client().relay_billing().unwrap(), "https://billing.example/manage");
+}

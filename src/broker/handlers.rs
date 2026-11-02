@@ -308,6 +308,7 @@ impl Broker {
             Request::RelaySubscribe { email, issuer } => self.relay_subscribe(caller, email.as_deref(), issuer),
             Request::RelayAccount { number, issuer } => self.use_relay_account(caller, &number, issuer),
             Request::RelayStatus => self.relay_status(caller),
+            Request::RelayBilling => self.relay_billing(caller),
         }
     }
 
