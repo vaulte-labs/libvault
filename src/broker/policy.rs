@@ -227,7 +227,12 @@ fn verdict(caller: &Caller, action: Action<'_>) -> Verdict {
         Action::SaveIcon => people_only(caller, "a session cannot add to the vault's icons", Verdict::Allow),
         // The person chose to let this device's AutoFill suggest their logins. An agent has no
         // such list to fill, and it would cross the space a grant gives.
-        Action::AutofillIdentities => people_only(caller, "a session cannot list logins for AutoFill", Verdict::Allow),
+        // Every login's site and username at once, with no prompt, so only the signed app that
+        // hands them to the system gets them. Any other process would learn who the person is where.
+        Action::AutofillIdentities => match caller {
+            Caller::App => Verdict::Allow,
+            Caller::Anyone | Caller::Session(_) => Verdict::Refuse("only the Vaulte app lists logins for AutoFill"),
+        },
         Action::ListPasskeys => people_only(caller, PASSKEYS, Verdict::Allow),
         // A passkey tells the site its user was just verified, so a person always is, even when an
         // agent asks.

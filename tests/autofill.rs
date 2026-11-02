@@ -30,10 +30,18 @@ fn each_logins_sites_and_username_are_listed_and_nothing_secret() {
     let vault = Vault::new();
     with_logins(&vault);
     fs::write(vault.home.join("deny"), "").unwrap();
+    fs::write(vault.home.join("trust-callers"), "").unwrap();
     let identities = vault.client().autofill_identities().unwrap();
     assert_eq!(identities, [identity("github.com", Some("me"), "github.com"), identity("gist.github.com", Some("me"), "github.com")]);
     let sent = serde_json::to_string(&identities).unwrap();
     assert!(!sent.contains("hunter2") && !sent.contains("JBSWY3DP"), "{sent}");
+}
+
+#[test]
+fn a_process_that_is_not_the_app_gets_no_autofill_list() {
+    let vault = Vault::new();
+    with_logins(&vault);
+    assert_eq!(code(vault.client().autofill_identities()), ErrorCode::Denied);
 }
 
 #[test]
@@ -48,6 +56,7 @@ fn an_agent_gets_no_autofill_list() {
 fn a_locked_vault_lists_nothing_and_asks_nobody() {
     let vault = Vault::new();
     with_logins(&vault);
+    fs::write(vault.home.join("trust-callers"), "").unwrap();
     let mut client = vault.client();
     client.lock().unwrap();
     assert_eq!(code(client.autofill_identities()), ErrorCode::Locked);
