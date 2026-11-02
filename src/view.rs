@@ -52,6 +52,10 @@ pub struct StatusInfo {
     /// Which code the broker is, so one left over from an upgrade can be replaced, and after a
     /// `+` the team that signed it, as `1.0.0-164b9dc4c14d67bc+TEAM`.
     pub build: String,
+    /// A new value whenever the vault changes, from any caller or another device, so an interface
+    /// showing items knows to read them again. Only whether it changed means anything.
+    #[serde(default)]
+    pub revision: u64,
 }
 
 /// What a sync actually did.

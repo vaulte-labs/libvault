@@ -350,6 +350,7 @@ impl Broker {
             problems,
             build: super::build(),
             trusted,
+            revision: core.vault.state.revision(),
         })
     }
 

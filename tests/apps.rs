@@ -55,6 +55,17 @@ fn status_says_whether_the_caller_is_the_vaults_own_app() {
 }
 
 #[test]
+fn status_tells_an_app_when_anything_else_changed_the_vault() {
+    let vault = Vault::new();
+    let mut app = vault.client();
+    let shown = app.status().unwrap().revision;
+    assert_eq!(app.status().unwrap().revision, shown, "nothing changed");
+    // Safari's extension, the command line and a synced device each come in as another caller.
+    vault.add_env("ADDED_ELSEWHERE", "value", None);
+    assert_ne!(app.status().unwrap().revision, shown);
+}
+
+#[test]
 fn the_app_shows_every_code_without_a_touch_once_unlocked() {
     let vault = Vault::new();
     with_a_login(&vault);
