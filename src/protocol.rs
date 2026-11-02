@@ -207,6 +207,11 @@ pub enum Request {
         name: String,
         to: String,
     },
+    Move {
+        space: Option<String>,
+        name: String,
+        to: String,
+    },
     Allow {
         space: Option<String>,
         name: String,

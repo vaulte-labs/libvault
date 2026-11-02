@@ -100,3 +100,56 @@ fn restoring_an_old_version_restores_every_copy() {
     client.restore(None, "github.com", 0).unwrap();
     assert_eq!(client.reveal(Some("Agents"), "github.com").unwrap(), login("first"));
 }
+
+#[test]
+fn a_copy_names_the_space_it_was_linked_from_and_the_home_names_none() {
+    let (vault, mut client) = linked();
+    vault.space("Work");
+    client.link(Some("Agents"), "github.com", "Work").unwrap();
+    assert_eq!(client.item(None, "github.com").unwrap().linked_from, None);
+    assert_eq!(client.item(Some("Agents"), "github.com").unwrap().linked_from.as_deref(), Some("Personal"));
+    assert_eq!(client.item(Some("Work"), "github.com").unwrap().linked_from.as_deref(), Some("Personal"), "the home, not the copy it came through");
+    client.remove(None, "github.com").unwrap();
+    assert_eq!(client.item(Some("Agents"), "github.com").unwrap().linked_from, None, "the oldest copy left is home");
+}
+
+#[test]
+fn moving_takes_it_out_of_one_space_into_another_and_one_undo_puts_it_back() {
+    let vault = Vault::new();
+    vault.space("Work");
+    let mut client = vault.client();
+    client.add(None, Meta::login("github.com"), login("p"), false).unwrap();
+    client.move_item(None, "github.com", "Work").unwrap();
+    assert_eq!(code(client.item(None, "github.com")), ErrorCode::NotFound);
+    let moved = client.item(Some("Work"), "github.com").unwrap();
+    assert_eq!((moved.also_in, moved.linked_from), (Vec::<String>::new(), None));
+    assert_eq!(client.reveal(Some("Work"), "github.com").unwrap(), login("p"));
+    client.undo().unwrap();
+    assert_eq!(client.reveal(None, "github.com").unwrap(), login("p"));
+    assert_eq!(code(client.item(Some("Work"), "github.com")), ErrorCode::NotFound);
+}
+
+#[test]
+fn moving_a_copy_into_a_space_that_has_the_item_only_takes_it_out() {
+    let (_vault, mut client) = linked();
+    client.move_item(Some("Agents"), "github.com", "Personal").unwrap();
+    assert_eq!(code(client.item(Some("Agents"), "github.com")), ErrorCode::NotFound);
+    assert_eq!(client.item(None, "github.com").unwrap().also_in, Vec::<String>::new());
+}
+
+#[test]
+fn moving_takes_a_touch_no_agent_can_give_and_a_taken_name_is_refused() {
+    let vault = Vault::new();
+    vault.space("Work");
+    let mut client = vault.client();
+    client.add(None, Meta::env("KEY"), env("a"), false).unwrap();
+    client.add(Some("Work"), Meta::env("KEY"), env("b"), false).unwrap();
+    assert_eq!(code(client.move_item(None, "KEY", "Work")), ErrorCode::Error);
+    let mut agent = vault.session_client(&vault.session("Personal", "agent"));
+    assert_eq!(code(agent.move_item(None, "KEY", "Work")), ErrorCode::Denied);
+    client.remove(Some("Work"), "KEY").unwrap();
+    fs::write(vault.home.join("deny"), "").unwrap();
+    assert_eq!(code(vault.client().move_item(None, "KEY", "Work")), ErrorCode::Denied);
+    assert_eq!(client.item(None, "KEY").unwrap().meta.name, "KEY");
+    assert_eq!(code(client.item(Some("Work"), "KEY")), ErrorCode::NotFound);
+}

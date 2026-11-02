@@ -46,6 +46,11 @@ pub(super) enum Action<'a> {
         name: &'a str,
         to: &'a str,
     },
+    /// Puts an item in another space instead, which widens who can read it as much.
+    MoveItem {
+        name: &'a str,
+        to: &'a str,
+    },
     DeleteItems {
         names: &'a [&'a str],
     },
@@ -222,6 +227,11 @@ fn verdict(caller: &Caller, action: Action<'_>) -> Verdict {
             "a session cannot show an item in another space",
             Verdict::Touch(format!("show {} in {} too", sanitize(name), sanitize(to))),
         ),
+        Action::MoveItem { name, to } => people_only(
+            caller,
+            "a session cannot move an item to another space",
+            Verdict::Touch(format!("move {} to {}", sanitize(name), sanitize(to))),
+        ),
         Action::Undo => Verdict::Touch("undo your last change".to_owned()),
         Action::Reveal { name, space } => Verdict::Touch(format!("reveal {} from {}", sanitize(name), sanitize(space))),
         Action::SaveIcon => people_only(caller, "a session cannot add to the vault's icons", Verdict::Allow),
@@ -353,6 +363,7 @@ mod tests {
         let words = ["a".to_owned(), "b".to_owned(), "c".to_owned()];
         let widening = [
             Action::LinkItem { name: "x", to: "Agents" },
+            Action::MoveItem { name: "x", to: "Agents" },
             Action::ChangeLockSettings,
             Action::AllowHost { name: "KEY", host: "evil.example" },
             Action::RunWithValues { command: "bun", space: "a", names: &["KEY"] },

@@ -12,6 +12,9 @@ pub struct ItemInfo {
     /// The other spaces this same item is in, when the caller may know of them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub also_in: Vec<String>,
+    /// The item's home, when this copy is one linked from there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

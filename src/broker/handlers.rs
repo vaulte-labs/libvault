@@ -8,8 +8,9 @@ use super::policy::{Action, Caller, Verdict, decide};
 use super::{Broker, Connection};
 use crate::device::software::present;
 use crate::expiry;
-use crate::ids::{ItemId, SpaceId};
+use crate::ids::SpaceId;
 use crate::item::{self, Meta, Secret};
+use crate::items::Summary;
 use crate::protocol::{Envelope, Request, Response};
 use crate::store::log::now_ms;
 use crate::view::{ContactInfo, GrantInfo, HistoryInfo, ItemInfo, StatusInfo};
@@ -33,15 +34,19 @@ pub(super) fn resolve_space(vault: &Vault, caller: &Caller, name: Option<&str>) 
     }
 }
 
-/// Names the other spaces an item is in, given the space it is listed in. Built once per
-/// request, so a list costs one pass over the vault rather than one per item.
-fn also_in(vault: &Vault, caller: &Caller) -> Result<impl Fn(&SpaceId, &ItemId) -> Vec<String>> {
+/// Shows an item listed in the space named `space`, with the other spaces it is in and its home
+/// when that is another. Built once per request, so a list costs one pass over the vault rather
+/// than one per item.
+fn shown(vault: &Vault, caller: &Caller) -> Result<impl Fn(&str, Summary) -> ItemInfo> {
     // A session sees one space, so the others an item is in are none of its business.
     let copies = if matches!(caller, Caller::Session(_)) { HashMap::new() } else { vault.copies() };
     // Only spaces this device can open, which on a server are the ones it holds.
     let names: HashMap<SpaceId, String> = vault.spaces()?.into_iter().map(|space| (space.id, space.name)).collect();
-    Ok(move |space: &SpaceId, item: &ItemId| {
-        copies.get(item).into_iter().flatten().filter(|other| *other != space).filter_map(|other| names.get(other).cloned()).collect()
+    Ok(move |space: &str, item: Summary| {
+        let known: Vec<&SpaceId> = copies.get(&item.id).into_iter().flatten().filter(|copy| names.contains_key(copy)).collect();
+        let linked_from = known.first().filter(|home| **home != &item.space).map(|home| names[*home].clone());
+        let also_in = known.into_iter().filter(|other| **other != item.space).map(|other| names[other].clone()).collect();
+        ItemInfo { space: space.to_owned(), meta: item.meta, also_in, linked_from }
     })
 }
 
@@ -154,13 +159,8 @@ impl Broker {
                 let core = self.unlocked()?;
                 let id = resolve_space(&core.vault, caller, space.as_deref())?;
                 let name = space_name(&core.vault, &id);
-                let also_in = also_in(&core.vault, caller)?;
-                let items = core
-                    .vault
-                    .items(&id)?
-                    .into_iter()
-                    .map(|item| ItemInfo { space: name.clone(), also_in: also_in(&id, &item.id), meta: item.meta })
-                    .collect();
+                let shown = shown(&core.vault, caller)?;
+                let items = core.vault.items(&id)?.into_iter().map(|item| shown(&name, item)).collect();
                 Ok(Response::Items { items })
             }
             Request::Show { space, name } => {
@@ -168,8 +168,7 @@ impl Broker {
                 let core = self.unlocked()?;
                 let id = resolve_space(&core.vault, caller, space.as_deref())?;
                 let found = core.vault.find(&id, &name)?;
-                let also_in = also_in(&core.vault, caller)?(&id, &found.id);
-                Ok(Response::Item { item: ItemInfo { space: space_name(&core.vault, &id), meta: found.meta, also_in } })
+                Ok(Response::Item { item: shown(&core.vault, caller)?(&space_name(&core.vault, &id), found) })
             }
             Request::Add { space, meta, secret, replace } => self.add(caller, space.as_deref(), meta, &secret, replace),
             Request::Import { space, items } => self.import(caller, space.as_deref(), items),
@@ -241,6 +240,15 @@ impl Broker {
                 let mut core = self.open_core()?;
                 core.vault.link(&from, &item.id, &to_id)?;
                 core.vault.record("link", &name, caller.name())?;
+                Ok(Response::Ok)
+            }
+            Request::Move { space, name, to } => {
+                let (from, item) = self.locate(caller, space.as_deref(), &name)?;
+                let to_id = resolve_space(&self.unlocked()?.vault, caller, Some(&to))?;
+                self.check(caller, Action::MoveItem { name: &name, to: &to })?;
+                let mut core = self.open_core()?;
+                core.vault.move_item(&from, &item.id, &to_id)?;
+                core.vault.record("move", &name, caller.name())?;
                 Ok(Response::Ok)
             }
             Request::Reveal { space, name } => {
@@ -381,7 +389,7 @@ impl Broker {
             return Err(Error::Locked);
         }
         let now = crate::store::log::now_ms() / 1000;
-        let also_in = also_in(&core.vault, caller)?;
+        let shown = shown(&core.vault, caller)?;
         let mut items = Vec::new();
         for space in core.vault.spaces()? {
             if matches!(caller, Caller::Session(grant) if space.id != grant.space) {
@@ -389,7 +397,7 @@ impl Broker {
             }
             for item in core.vault.items(&space.id)? {
                 if item.meta.expires.as_deref().is_some_and(|expires| expiry::runs_out_soon(expires, now)) {
-                    items.push(ItemInfo { space: space.name.clone(), also_in: also_in(&space.id, &item.id), meta: item.meta });
+                    items.push(shown(&space.name, item));
                 }
             }
         }

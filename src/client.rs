@@ -287,6 +287,11 @@ impl Client {
         self.call(Request::Link { space: space.map(str::to_owned), name: name.to_owned(), to: to.to_owned() }).map(drop)
     }
 
+    /// Takes an item out of its space and into `to`, after a touch, as one change `undo` takes back.
+    pub fn move_item(&mut self, space: Option<&str>, name: &str, to: &str) -> Result<()> {
+        self.call(Request::Move { space: space.map(str::to_owned), name: name.to_owned(), to: to.to_owned() }).map(drop)
+    }
+
     /// Takes two-factor off a login, after a touch. Its history keeps the setup key.
     pub fn remove_code(&mut self, space: Option<&str>, name: &str) -> Result<()> {
         self.call(Request::RemoveCode { space: space.map(str::to_owned), name: name.to_owned() }).map(drop)
