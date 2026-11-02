@@ -21,11 +21,7 @@ an agent ever reading one.
 Every interface, from the `vlt` CLI to the Mac app, browser extension and SDKs, is a thin client of
 this library, so no interface can skip an approval.
 
-## Status
-
-Not yet released, and not audited by anyone outside the project. The format changed recently, and
-the flows that need a person's touch on real hardware haven't been run again since. DESIGN.md lists
-what is **tested**, **documented** and still **assumed**.
+## Platforms
 
 | Platform | Backend |
 |---|---|
