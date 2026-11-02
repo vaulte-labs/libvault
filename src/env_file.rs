@@ -16,9 +16,9 @@ pub struct EnvFile {
     pub unreadable_lines: Vec<usize>,
 }
 
+/// A name the vault would store, so one it refuses is reported by line and the rest still import.
 fn valid_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars.next().is_some_and(|first| first.is_ascii_alphabetic() || first == '_') && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    crate::item::check_variable(name).is_ok()
 }
 
 /// Reads a quoted value starting after the opening quote, across lines if needed. Returns the

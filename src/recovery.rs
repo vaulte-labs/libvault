@@ -18,6 +18,11 @@ use crate::{Error, Result};
 
 const SALT: &[u8] = b"lv.recovery.v1";
 
+/// Whether `word` is one a recovery key can hold, so a typo can be asked again on its own.
+pub fn is_recovery_word(word: &str) -> bool {
+    bip39::Language::English.find_word(&word.to_lowercase()).is_some()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryKey(Key);
 

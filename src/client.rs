@@ -14,10 +14,12 @@ use crate::import::Imported;
 use crate::item::{Meta, Secret};
 use crate::protocol::{CurrentCode, Envelope, Request, Response, SpaceCode, read_frame, write_frame};
 use crate::recovery::RecoveryDraft;
-use crate::sync::folder::BackupReport;
-use crate::view::{GrantInfo, HistoryInfo, ItemInfo, StatusInfo, SyncReport};
+use crate::view::{GrantInfo, Granted, HistoryInfo, ItemInfo, StatusInfo};
 use crate::{Error, ErrorCode, Result};
 use zeroize::Zeroizing;
+
+/// The longest a grant lasts, so one forgotten still runs out by tomorrow.
+pub const MAX_GRANT: Duration = Duration::from_hours(24);
 
 /// A healthy broker answers `status` at once, even during a touch prompt.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -45,7 +47,8 @@ pub(crate) type RunEnvironment = (Vec<(String, String)>, Vec<String>);
 pub struct Connect<'a> {
     /// For a vault with no secure hardware, what the person typed. It goes with every request and
     /// the broker keeps none of it, so anything that would need a touch needs this instead, and
-    /// fails with `PassphraseNeeded` until an interface asks for it.
+    /// fails with `PassphraseNeeded` until an interface asks for it, or asks by itself with
+    /// [`Client::ask_for_passphrase_with`].
     pub passphrase: Option<&'a str>,
     /// A session from [`Client::grant`], limiting this client to that session's space.
     pub session: Option<&'a str>,
@@ -60,7 +63,11 @@ pub struct Client {
     passphrase: Option<Zeroizing<String>>,
     /// How to replace a broker that turns out not to know a request, once.
     upgrade: Option<Upgrade>,
+    ask_passphrase: Option<AskPassphrase>,
 }
+
+/// Asks the person for the vault's passphrase, naming what it approves, as a touch prompt would.
+pub type AskPassphrase = fn(reason: &str) -> Result<Zeroizing<String>>;
 
 impl Client {
     /// Connects to the vault at `home`, starting or replacing the broker if needed.
@@ -75,7 +82,7 @@ impl Client {
         if let Ok(stream) = UnixStream::connect(&socket) {
             stream.set_read_timeout(Some(PROBE_TIMEOUT))?;
             // The probe carries no session, so an expired token can never look like a dead broker.
-            let mut client = Self { stream, session: None, passphrase: None, upgrade: None };
+            let mut client = Self { stream, session: None, passphrase: None, upgrade: None, ask_passphrase: None };
             match client.status() {
                 // A broker holds keys, and other interfaces may be using it, so only one that ranks
                 // higher replaces it: a newer release, left over from an upgrade, or a signed build
@@ -96,9 +103,15 @@ impl Client {
                 Err(_) => kill_broker(home),
             }
         }
-        let stream =
-            start(home, &daemon.ok_or(Error::BrokerUnavailable("Vaulte's broker could not be found; is it installed beside this program?"))?)?;
-        Ok(Self { stream, session, passphrase, upgrade: None })
+        let stream = start(home, &daemon.ok_or(Error::BrokerUnavailable("its background program is not beside this one. Reinstall Vaulte"))?)?;
+        Ok(Self { stream, session, passphrase, upgrade: None, ask_passphrase: None })
+    }
+
+    /// On a vault with no secure hardware, asks with `ask` when a request needs the passphrase,
+    /// then sends that request again with it, so nothing a person already typed or piped is lost.
+    /// What they type goes with every later request, as `Connect::passphrase` does.
+    pub fn ask_for_passphrase_with(&mut self, ask: AskPassphrase) {
+        self.ask_passphrase = Some(ask);
     }
 
     /// Sends `request`. A broker that does not know it is older than this program, and is
@@ -106,10 +119,14 @@ impl Client {
     fn call(&mut self, request: Request) -> Result<Response> {
         let mut reply = self.exchange(request.clone())?;
         if matches!(reply, Response::Error { code: ErrorCode::Outdated, .. }) && self.replace_outdated()? {
+            reply = self.exchange(request.clone())?;
+        }
+        if let (Response::Error { code: ErrorCode::NeedsPassphrase, message }, None, Some(ask)) = (&reply, &self.passphrase, self.ask_passphrase) {
+            self.passphrase = Some(ask(passphrase_reason(message))?);
             reply = self.exchange(request)?;
         }
         match reply {
-            Response::Error { code: ErrorCode::NeedsPassphrase, .. } => Err(Error::PassphraseNeeded),
+            Response::Error { code: ErrorCode::NeedsPassphrase, message } => Err(Error::PassphraseNeeded(passphrase_reason(&message).to_owned())),
             Response::Error { code, message } => Err(Error::Broker { code, message }),
             response => Ok(response),
         }
@@ -150,17 +167,6 @@ impl Client {
         let _ = self.stream.set_read_timeout(Some(PROBE_TIMEOUT));
         let _ = self.stream.read(&mut [0u8; 1]);
         Ok(())
-    }
-
-    pub fn spaces(&mut self) -> Result<Vec<String>> {
-        match self.call(Request::Spaces)? {
-            Response::Spaces { spaces } => Ok(spaces),
-            _ => Err(UNEXPECTED),
-        }
-    }
-
-    pub fn create_space(&mut self, name: &str) -> Result<()> {
-        self.call(Request::SpaceAdd { name: name.to_owned() }).map(drop)
     }
 
     pub fn items(&mut self, space: Option<&str>) -> Result<Vec<ItemInfo>> {
@@ -314,8 +320,9 @@ impl Client {
     }
 
     /// Gives `agent` one space for `lifetime`, once the person approves on this device or any
-    /// other. `reason` is the agent's own words, shown after the facts. Returns the token and id.
-    pub fn grant(&mut self, space: Option<&str>, agent: &str, lifetime: Duration, reason: Option<&str>) -> Result<(String, String)> {
+    /// other. `reason` is the agent's own words, shown after the facts. A grant lasts from a minute
+    /// to [`MAX_GRANT`]; anything else is refused before anyone is asked.
+    pub fn grant(&mut self, space: Option<&str>, agent: &str, lifetime: Duration, reason: Option<&str>) -> Result<Granted> {
         let request = Request::Grant {
             space: space.map(str::to_owned),
             agent: agent.to_owned(),
@@ -323,7 +330,7 @@ impl Client {
             reason: reason.map(str::to_owned),
         };
         match self.call(request)? {
-            Response::Granted { token, id, .. } => Ok((token, id)),
+            Response::Granted { token, id, seconds, space } => Ok(Granted { token, id, space, seconds }),
             _ => Err(UNEXPECTED),
         }
     }
@@ -343,42 +350,6 @@ impl Client {
     /// key. With two or more devices this needs the current recovery key too.
     pub fn rotate_recovery(&mut self, draft: &RecoveryDraft, recovery_words: Option<&str>) -> Result<()> {
         self.call(Request::RecoveryRotate { new_words: draft.words().to_string(), recovery: recovery_words.map(str::to_owned) }).map(drop)
-    }
-
-    /// Writes an encrypted archive that only the recovery key opens, after a touch.
-    pub fn export_archive(&mut self, path: &Path) -> Result<()> {
-        self.call(Request::Export { path: absolute(path)?, recovery: None, plaintext: false }).map(drop)
-    }
-
-    /// Writes everything in the clear, as JSON only this user can read, after a touch. With two
-    /// or more devices this needs the recovery key too.
-    pub fn export_plaintext(&mut self, path: &Path, recovery_words: Option<&str>) -> Result<()> {
-        self.call(Request::Export { path: absolute(path)?, recovery: recovery_words.map(str::to_owned), plaintext: true }).map(drop)
-    }
-
-    /// Keeps an encrypted copy of the vault in `folder`, such as iCloud Drive or a USB drive.
-    pub fn add_backup(&mut self, folder: &Path) -> Result<()> {
-        self.call(Request::BackupAdd { path: absolute(folder)? }).map(drop)
-    }
-
-    pub fn remove_backup(&mut self, folder: &Path) -> Result<()> {
-        self.call(Request::BackupRemove { path: absolute(folder)? }).map(drop)
-    }
-
-    /// Reads a backup back and compares it with this vault.
-    pub fn verify_backup(&mut self, folder: &Path) -> Result<BackupReport> {
-        match self.call(Request::BackupVerify { path: absolute(folder)? })? {
-            Response::Verified(report) => Ok(report),
-            _ => Err(UNEXPECTED),
-        }
-    }
-
-    /// Exchanges logs with every backup folder and known device now, and says how that went.
-    pub fn sync_now(&mut self) -> Result<SyncReport> {
-        match self.call(Request::SyncNow)? {
-            Response::Synced(report) => Ok(report),
-            _ => Err(UNEXPECTED),
-        }
     }
 
     /// Settles a conflict from two devices changing the roster at once, by accepting the side
@@ -406,6 +377,11 @@ impl Client {
             _ => Err(UNEXPECTED),
         }
     }
+}
+
+/// What a passphrase would approve, out of the broker's message for `Error::PassphraseNeeded`.
+fn passphrase_reason(message: &str) -> &str {
+    message.strip_prefix("a passphrase is needed to ").unwrap_or("open this vault")
 }
 
 fn absolute(path: &Path) -> Result<PathBuf> {
@@ -471,7 +447,7 @@ fn spawn(home: &Path, daemon: &Path) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| Error::BrokerUnavailable("Vaulte's broker could not be started; is it installed beside this program?"))?;
+        .map_err(|_| Error::BrokerUnavailable("its background program could not be started. Reinstall Vaulte"))?;
     Ok(())
 }
 
@@ -480,6 +456,12 @@ mod browser;
 
 #[path = "client_devices.rs"]
 mod devices;
+
+#[path = "client_copies.rs"]
+mod copies;
+
+#[path = "client_spaces.rs"]
+mod spaces;
 
 #[path = "client_builds.rs"]
 mod builds;

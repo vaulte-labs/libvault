@@ -33,7 +33,7 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).map_err(|error| match error.kind() {
         std::io::ErrorKind::AlreadyExists => Error::Exists(path.display().to_string()),
-        _ => Error::Io(error),
+        _ => Error::Unreadable(format!("{} could not be written: {}", path.display(), crate::error::reason(&error))),
     })?;
     file.write_all(bytes)?;
     file.sync_all()?;

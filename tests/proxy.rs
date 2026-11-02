@@ -480,7 +480,7 @@ fn an_expired_grant_ends_a_running_program_s_access() {
     let vault = Vault::new();
     let server = upstream(&vault.home);
     project(&vault);
-    let session = vault.client().grant(Some("project-a"), "claude", std::time::Duration::from_secs(1), None).unwrap().0;
+    let session = vault.client().grant(Some("project-a"), "claude", std::time::Duration::from_secs(1), None).unwrap().token;
     let used = requests_with_the_secret(&vault, &server, Some(&session), || std::thread::sleep(std::time::Duration::from_secs(4)));
     assert_eq!(used, 1, "the secret was still in use after the grant expired");
 }

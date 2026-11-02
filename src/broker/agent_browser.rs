@@ -26,6 +26,10 @@ const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 const MAX_HELD: usize = 16;
 const GONE: Error = Error::Peer("the agent's browser stopped responding");
 
+fn unreachable(endpoint: &str, error: &std::io::Error) -> Error {
+    Error::Unreadable(format!("the agent's browser at {endpoint} could not be reached: {}", crate::error::reason(error)))
+}
+
 /// Asks a local debugging endpoint for its socket address. Chrome leaves the connection open,
 /// so this reads exactly the advertised length, with a timeout so a bad endpoint cannot stall.
 fn devtools_socket(endpoint: &str) -> Result<String> {
@@ -34,7 +38,7 @@ fn devtools_socket(endpoint: &str) -> Result<String> {
     let origin = origin.ok_or(Error::Invalid("the agent's browser must be a local DevTools address, like http://127.0.0.1:9222"))?;
     let authority = format!("{}:{}", origin.host, origin.port);
     // What was checked is what is reached, whatever else the address was written to look like.
-    let mut stream = TcpStream::connect(&authority)?;
+    let mut stream = TcpStream::connect(&authority).map_err(|error| unreachable(endpoint, &error))?;
     stream.set_read_timeout(Some(DEVTOOLS_TIMEOUT))?;
     stream.write_all(format!("GET /json/version HTTP/1.1\r\nHost: {authority}\r\n\r\n").as_bytes())?;
 
@@ -93,7 +97,7 @@ pub(super) struct AgentBrowser {
 impl AgentBrowser {
     pub fn connect(endpoint: &str) -> Result<Self> {
         let (origin, url) = locate(endpoint)?;
-        let stream = TcpStream::connect((origin.host.as_str(), origin.port))?;
+        let stream = TcpStream::connect((origin.host.as_str(), origin.port)).map_err(|error| unreachable(endpoint, &error))?;
         stream.set_read_timeout(Some(DEVTOOLS_TIMEOUT))?;
         stream.set_write_timeout(Some(DEVTOOLS_TIMEOUT))?;
         let config = WebSocketConfig::default().max_message_size(Some(MAX_MESSAGE)).max_frame_size(Some(MAX_MESSAGE));

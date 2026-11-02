@@ -131,9 +131,9 @@ impl Device for Software {
         &self.public
     }
 
-    fn authorize(&self, _reason: &str) -> Result<Box<dyn Authorized + '_>> {
+    fn authorize(&self, reason: &str) -> Result<Box<dyn Authorized + '_>> {
         let presented = PRESENTED.with(|presented| presented.borrow().clone());
-        let passphrase = self.passphrase.clone().or(presented).ok_or(Error::PassphraseNeeded)?;
+        let passphrase = self.passphrase.clone().or(presented).ok_or_else(|| Error::PassphraseNeeded(reason.to_owned()))?;
         let key = stretch(&passphrase, &self.salt, self.cost)?;
         let secrets = crypto::open(&key, &Binding::SoftwareKeys, &self.sealed).map_err(|_| Error::WrongPassphrase)?;
         let mut r = Reader::new(&secrets);
@@ -221,12 +221,12 @@ mod tests {
     fn with_no_passphrase_to_hand_nothing_is_approved() {
         let device = Software::generate("right", Cost::FAST).unwrap();
         let held = Software::from_stored(&device.to_stored(), None).unwrap();
-        assert!(matches!(held.authorize("test").err(), Some(Error::PassphraseNeeded)));
+        assert!(matches!(held.authorize("test").err(), Some(Error::PassphraseNeeded(_))));
 
         let presented = present(Some(Zeroizing::new("right".to_owned())));
         assert!(held.authorize("test").is_ok(), "a person handed it over for this request");
         drop(presented);
-        assert!(matches!(held.authorize("test").err(), Some(Error::PassphraseNeeded)), "and it must end with the request");
+        assert!(matches!(held.authorize("test").err(), Some(Error::PassphraseNeeded(_))), "and it must end with the request");
     }
 
     #[test]

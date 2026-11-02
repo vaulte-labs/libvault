@@ -331,7 +331,7 @@ fn folders_link_to_spaces_from_any_depth() {
     let nested = vault.dir.path().join("work/nested");
     fs::create_dir_all(&nested).unwrap();
     libvault::link_folder(nested.parent().unwrap(), "project-b").unwrap();
-    assert_eq!(libvault::linked_space(&nested).as_deref(), Some("project-b"));
+    assert_eq!(libvault::linked_space(&nested).unwrap().map(|linked| linked.space).as_deref(), Some("project-b"));
 }
 
 #[test]

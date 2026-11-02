@@ -566,7 +566,7 @@ fn ending_a_grant_stops_a_sign_in_that_has_started() {
     meta.urls = vec![format!("http://127.0.0.1:{}/slow-login", home.port)];
     meta.username = Some("me@example.com".to_owned());
     vault.client().add(Some("project-a"), meta, Secret::Login { password: PASSWORD.to_owned(), totp: None }, false).unwrap();
-    let (token, id) = vault.client().grant(Some("project-a"), "claude", Duration::from_secs(3600), None).unwrap();
+    let libvault::Granted { token, id, .. } = vault.client().grant(Some("project-a"), "claude", Duration::from_secs(3600), None).unwrap();
     let (mut agent, target) = (vault.session_client(&token), into(&vault));
     let signing_in = std::thread::spawn(move || agent.login(None, "Site", target));
     std::thread::sleep(Duration::from_millis(1000));

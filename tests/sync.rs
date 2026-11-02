@@ -668,7 +668,7 @@ fn a_server_opens_its_vault_by_itself_and_its_agent_gets_a_grant_from_another_de
     let (laptop, server) = laptop_and_server();
     // Nobody on the server ever types a passphrase, after a restart too.
     for _ in 0..2 {
-        let (token, _) = nobody_at(&server).grant(None, "deploy-bot", Duration::from_secs(3600), Some("renewing the deploy token")).unwrap();
+        let token = nobody_at(&server).grant(None, "deploy-bot", Duration::from_secs(3600), Some("renewing the deploy token")).unwrap().token;
         let items = server.session_client(&token).items(None).unwrap();
         assert!(items.iter().any(|item| item.meta.name == "DEPLOY_TOKEN"), "the agent can use what the laptop saved");
         nobody_at(&server).stop().unwrap();
@@ -719,7 +719,7 @@ fn laptop_and_agents_server() -> (Vault, Vault) {
 
 /// What an agent on `server` can list in Agents, once the laptop's person grants it.
 fn granted_agents(server: &Vault, reason: &str) -> Vec<String> {
-    let (token, _) = nobody_at(server).grant(Some("Agents"), "deploy-bot", Duration::from_secs(3600), Some(reason)).unwrap();
+    let token = nobody_at(server).grant(Some("Agents"), "deploy-bot", Duration::from_secs(3600), Some(reason)).unwrap().token;
     server.session_client(&token).items(Some("Agents")).unwrap().into_iter().map(|item| item.meta.name).collect()
 }
 
@@ -736,7 +736,7 @@ fn a_server_holding_chosen_spaces_opens_them_alone() {
 #[test]
 fn what_an_agent_saves_on_a_server_reaches_the_laptop() {
     let (laptop, server) = laptop_and_agents_server();
-    let (token, _) = nobody_at(&server).grant(Some("Agents"), "deploy-bot", Duration::from_secs(3600), Some("saving a token")).unwrap();
+    let token = nobody_at(&server).grant(Some("Agents"), "deploy-bot", Duration::from_secs(3600), Some("saving a token")).unwrap().token;
     server.session_client(&token).add(Some("Agents"), Meta::env("NEW_TOKEN"), env("fresh"), false).unwrap();
     assert_eq!(arrives_in(&laptop, Some("Agents"), "NEW_TOKEN"), "fresh");
 }
@@ -790,7 +790,7 @@ fn a_server_cannot_change_an_item_that_is_also_in_a_space_it_does_not_hold() {
     let (laptop, server) = laptop_and_agents_server();
     laptop.client().link(Some("Agents"), "DEPLOY_TOKEN", "Personal").unwrap();
     reaches_every_device(&laptop);
-    let (token, _) = nobody_at(&server).grant(Some("Agents"), "deploy-bot", Duration::from_secs(3600), Some("rotating it")).unwrap();
+    let token = nobody_at(&server).grant(Some("Agents"), "deploy-bot", Duration::from_secs(3600), Some("rotating it")).unwrap().token;
     let mut agent = server.session_client(&token);
     // Changing what is there takes a touch, and nobody is at a server to give one, so neither copy
     // can be changed from it, let alone one without the other.

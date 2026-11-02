@@ -13,6 +13,10 @@ Rules that hold in every flow:
 - **Errors say what happened and what to do next**, and never contain a secret.
 - **Agents get `--json` everywhere** and stable exit codes:
   `0` ok, `1` error, `2` usage, `3` locked, `4` denied, `5` not found, `6` needs a person.
+  An error under `--json` is `{"error", "code", "next"}`, and its code is one of `error`,
+  `usage`, `locked`, `needs_passphrase` (exit `3`: ask for the passphrase and try again),
+  `denied`, `not_found`, `needs_person`, `needs_host` (exit `1`) and `outdated` (exit `1`: the
+  running broker is older than the program, and was not replaced).
 
 ## 1. Onboarding
 
@@ -75,12 +79,20 @@ and no agent can.
 
 | Failure | Result |
 |---|---|
-| The name exists | Stops. `--replace` keeps the old value in history. |
+| The name exists | Stops, and says `vlt edit` changes it. An edit keeps the old version in history, keeps anything it was not given, a login's setup key included, and never changes an item's kind. |
 | Empty stdin | Error. Nothing saved. |
 | Agent overwrites an existing item | Needs a touch; a grant allows creating, never replacing. |
 | Deleted by mistake | `vlt undo`, or `vlt history <name>` then restore. Restoring takes a touch, is a new write, and loses nothing. |
 | A variable that changes how programs run (`LD_PRELOAD`, `NODE_OPTIONS`) | Refused. It would run inside anything given real values. |
+| A variable name no shell takes (`my-key`, `1ABC`), or one starting `LV_` | Refused, saying which rule it breaks. `LV_` names configure Vaulte. |
+| A login site that is not a web address (`javascript:`), or a setup key that makes no codes | Refused before any touch, on add, edit and import alike. An import names the row. |
 | A card number that fails its checksum, or a profile detail no form takes | Refused before any touch is asked for, on add, edit and import alike. |
+
+Spaces are named once: a name differing only by case or surrounding spaces is the same name.
+`vlt space rename` keeps a space's items and grants, after a touch. `vlt space rm` removes only an
+empty space, after a touch, saying what one still holds; making a space with its name again brings
+it back with the history of what was deleted from it. Personal, where everything goes when no
+space is named, keeps its name and stays.
 
 One item can be in more than one space, such as a login a person also gives their agents through
 an Agents space. Showing it in another space takes a touch naming both, because it widens who can
@@ -131,7 +143,7 @@ No lock-in: the format is open and an export always works.
 
 | Failure | Result |
 |---|---|
-| Plaintext requested with piped stdout | Refused; a path is required. |
+| Plaintext requested to stdout (`-`) | Refused; a path is required. |
 | Target exists | Refused. |
 | Second device unavailable | Recovery key can stand in. |
 
@@ -207,6 +219,9 @@ your terminal. So there is one mechanism: a scoped token. Without one, each use 
 | Expired, screen locked, or revoked | Exit `4`, and the agent must ask again. |
 | Token used outside its space | Exit `4`. Audited. |
 
+A grant lasts at most 24 hours; a longer or empty one is refused, never shortened. `vlt grant`
+prints which space it gives and for how long on stderr, so stdout stays one line for `eval`.
+
 `vlt grant ls` and `vlt grant rm` manage grants. The app lists them too. Item names are listed to
 anyone running as you while the vault is unlocked; values never are.
 
@@ -220,6 +235,7 @@ command and space.
 | Secret has allowed hosts | Child gets a placeholder. The proxy swaps it only for those hosts, and only in a credential header. |
 | Placeholder in a URL or an ordinary header | Passed through unchanged. A server could keep it where nothing scrubs it. |
 | Secret has no allowed hosts | Exit `1`, naming it and the fix: `vlt allow NAME host`. |
+| A host allowed for anything but an env var | Refused: the proxy only ever sends env vars. |
 | Tool needs the real value | `vlt run --env NAME -- cmd`: touch per run, even with a grant, output scrubbed. |
 | Placeholder sent to another host | Passed through unchanged. Nothing leaks. |
 | Response echoes the secret | Scrubbed before it reaches the child, in the usual encodings too. |

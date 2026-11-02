@@ -28,6 +28,23 @@ pub enum Kind {
     Icon,
 }
 
+impl Kind {
+    /// The kind as interfaces and the stored form write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Login => "login",
+            Self::Card => "card",
+            Self::Env => "env",
+            Self::Note => "note",
+            Self::Ssh => "ssh",
+            Self::Passkey => "passkey",
+            Self::Wifi => "wifi",
+            Self::Profile => "profile",
+            Self::Icon => "icon",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Meta {
     pub kind: Kind,
@@ -66,7 +83,8 @@ impl Meta {
     /// A login. A name that looks like a domain becomes its first fill site.
     pub fn login(name: impl Into<String>) -> Self {
         let name = name.into();
-        let urls = if name.contains('.') && !name.contains(char::is_whitespace) { vec![format!("https://{name}")] } else { Vec::new() };
+        let site = format!("https://{name}");
+        let urls = if name.contains('.') && check_site(&site).is_ok() { vec![site] } else { Vec::new() };
         Self { urls, ..Self::new(Kind::Login, name) }
     }
 }
@@ -129,16 +147,37 @@ const NOT_FOR_STORING: &[&str] = &[
     "_JAVA_OPTIONS",
 ];
 
-fn is_safe_variable(name: &str) -> bool {
-    let plain = name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !name.starts_with(|c: char| c.is_ascii_digit());
+pub(crate) fn check_variable(name: &str) -> Result<()> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') || name.starts_with(|c: char| c.is_ascii_digit()) {
+        return Err(Error::Invalid("a variable's name is letters, digits and underscores, and does not start with a digit, like API_KEY"));
+    }
     let upper = name.to_ascii_uppercase();
-    plain && !upper.starts_with("LD_") && !upper.starts_with("DYLD_") && !NOT_FOR_STORING.contains(&upper.as_str())
+    // These configure Vaulte itself, in every program it starts.
+    if upper.starts_with("LV_") {
+        return Err(Error::Invalid("names starting with LV_ are Vaulte's own, so choose another"));
+    }
+    if upper.starts_with("LD_") || upper.starts_with("DYLD_") || NOT_FOR_STORING.contains(&upper.as_str()) {
+        return Err(Error::Invalid("that variable changes how programs run, so it cannot be stored"));
+    }
+    Ok(())
+}
+
+/// Rejects a site a login could never fill on, such as `javascript:` or a bare word.
+pub(crate) fn check_site(url: &str) -> Result<()> {
+    if url.trim() == url && crate::fill::Origin::parse(url).is_some() {
+        Ok(())
+    } else {
+        Err(Error::Invalid("a login's site is a web address, like https://example.com"))
+    }
 }
 
 /// Rejects a listing that could not have come from an honest interface.
 pub(crate) fn validate(meta: &Meta) -> Result<()> {
-    if meta.kind == Kind::Env && !is_safe_variable(&meta.name) {
-        return Err(Error::Invalid("that variable changes how programs run, so it cannot be stored"));
+    if meta.kind == Kind::Env {
+        check_variable(&meta.name)?;
+    }
+    if meta.kind == Kind::Login {
+        meta.urls.iter().try_for_each(|url| check_site(url))?;
     }
     if meta.kind == Kind::Wifi && meta.name.len() > LONGEST_NETWORK_NAME {
         return Err(Error::Invalid("a Wi-Fi network name is at most 32 bytes"));
@@ -174,6 +213,9 @@ pub(crate) fn check(meta: &Meta, secret: &Secret) -> Result<()> {
             Err(Error::Invalid("give the expiry as a month and year, like 12/30"))
         }
         Secret::Profile(profile) => profile.check(),
+        Secret::Login { totp: Some(key), .. } if crate::totp::Totp::parse(key).is_err() => {
+            Err(Error::Invalid("that two-factor setup key cannot make codes. Copy the key the site shows, or its otpauth:// link"))
+        }
         // Its key is made in the broker for the site that asks, never handed in from outside.
         Secret::Passkey { .. } => Err(Error::Invalid("a passkey is made for the site that asks for one")),
         _ => Ok(()),
@@ -328,6 +370,34 @@ mod tests {
         for name in ["OPENAI_API_KEY", "DATABASE_URL", "my_token", "PATHLESS"] {
             assert!(validate(&Meta::new(Kind::Env, name)).is_ok(), "{name}");
         }
+    }
+
+    #[test]
+    fn a_refused_variable_name_is_told_why() {
+        let reason = |name: &str| validate(&Meta::new(Kind::Env, name)).unwrap_err().to_string();
+        for name in ["my-key", "1ABC", "é_KEY"] {
+            assert!(reason(name).contains("letters, digits and underscores"), "{name}");
+        }
+        for name in ["LV_HOME", "LV_SESSION", "lv_anything"] {
+            assert!(reason(name).contains("Vaulte's own"), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_login_fills_only_on_web_addresses() {
+        let with_site = |url: &str| Meta { urls: vec![url.to_owned()], ..Meta::new(Kind::Login, "x") };
+        for url in ["javascript:alert(1)", "github.com", "ftp://github.com", " https://github.com", "https://"] {
+            assert!(validate(&with_site(url)).is_err(), "{url}");
+        }
+        assert!(validate(&with_site("https://github.com/login")).is_ok());
+    }
+
+    #[test]
+    fn a_setup_key_that_cannot_make_codes_is_refused() {
+        let login = |totp: &str| Secret::Login { password: "pw".to_owned(), totp: Some(totp.to_owned()) };
+        assert!(check(&Meta::login("x"), &login("not base32!")).is_err());
+        assert!(check(&Meta::login("x"), &login("pw\nJBSWY3DPEHPK3PXP")).is_err());
+        assert!(check(&Meta::login("x"), &login("JBSWY3DPEHPK3PXP")).is_ok());
     }
 
     #[test]

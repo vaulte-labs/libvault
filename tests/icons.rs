@@ -138,7 +138,7 @@ fn a_session_reads_its_own_space_and_cannot_write() {
     let mut client = unlocked(&vault);
     client.save_icon(Some("Work"), SITE, &png(1)).unwrap();
     client.save_icon(None, SITE, &png(2)).unwrap();
-    let (token, _) = client.grant(Some("Work"), "agent", Duration::from_secs(60), None).unwrap();
+    let token = client.grant(Some("Work"), "agent", Duration::from_secs(60), None).unwrap().token;
     let mut session = Client::connect(&vault.home, options(Some(&token))).unwrap();
 
     assert_eq!(session.icon(None, SITE).unwrap(), Some(drawn(1)));

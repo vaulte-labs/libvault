@@ -2,6 +2,7 @@
 //! asks that table, and acts.
 
 use super::grants::Grant;
+use super::history::history_info;
 use super::linking::shown;
 use super::policy::{Action, Caller, Verdict, decide};
 use super::{Broker, Connection};
@@ -11,10 +12,10 @@ use crate::ids::SpaceId;
 use crate::item::{self, Meta, Secret};
 use crate::protocol::{Envelope, Request, Response};
 use crate::store::log::now_ms;
-use crate::view::{ContactInfo, GrantInfo, HistoryInfo, StatusInfo};
+use crate::view::{ContactInfo, GrantInfo, StatusInfo};
 use crate::{Error, ErrorCode, Result, Vault};
 
-pub(super) const MAX_GRANT_SECONDS: u64 = 24 * 60 * 60;
+pub(super) const MAX_GRANT_SECONDS: u64 = crate::MAX_GRANT.as_secs();
 
 fn failure(error: &Error) -> Response {
     Response::Error { code: error.code(), message: error.to_string() }
@@ -30,6 +31,15 @@ pub(super) fn resolve_space(vault: &Vault, caller: &Caller, name: Option<&str>) 
         }
         (Caller::Anyone | Caller::App, name) => Ok(vault.space(name.unwrap_or(crate::FIRST_SPACE))?.id),
     }
+}
+
+/// A login's setup key never reaches an interface, so a new login secret with none keeps the one
+/// stored. Taking it off is its own request.
+fn keep_setup_key(mut secret: Secret, stored: &Secret) -> Secret {
+    if let (Secret::Login { totp: given @ None, .. }, Secret::Login { totp: kept, .. }) = (&mut secret, stored) {
+        given.clone_from(kept);
+    }
+    secret
 }
 
 pub(super) fn space_name(vault: &Vault, id: &SpaceId) -> String {
@@ -130,12 +140,9 @@ impl Broker {
                 Ok(Response::Ok)
             }
             Request::Spaces => self.spaces(caller),
-            Request::SpaceAdd { name } => {
-                item::validate_text(&name)?;
-                self.check(caller, Action::CreateSpace)?;
-                self.unlocked()?.vault.create_space(&name)?;
-                Ok(Response::Ok)
-            }
+            Request::SpaceAdd { name } => self.create_space(caller, &name),
+            Request::SpaceRename { name, to } => self.rename_space(caller, &name, &to),
+            Request::SpaceRemove { name } => self.remove_space(caller, &name),
             Request::List { space } => {
                 self.check(caller, Action::Read)?;
                 let core = self.unlocked()?;
@@ -181,9 +188,7 @@ impl Broker {
                 let core = self.unlocked()?;
                 let id = resolve_space(&core.vault, caller, space.as_deref())?;
                 let item = core.vault.find_any(&id, &name)?;
-                let versions = core.vault.history(&id, &item)?;
-                let versions = versions.iter().map(|version| HistoryInfo { at_ms: version.clock >> 16, deleted: version.meta.is_none() }).collect();
-                Ok(Response::History { versions })
+                Ok(Response::History { versions: history_info(&core.vault.history(&id, &item)?) })
             }
             Request::Restore { space, name, version } => {
                 let (id, item) = {
@@ -241,6 +246,11 @@ impl Broker {
             Request::Allow { space, name, host } => {
                 item::validate_host(&host)?;
                 let (id, item) = self.locate(caller, space.as_deref(), &name)?;
+                // The proxy swaps placeholders for env vars alone, so a host on anything else would
+                // read as allowed and never be used.
+                if item.meta.kind != item::Kind::Env {
+                    return Err(Error::Unreadable(format!("{name} is not an env var, and only an env var can be sent to a host")));
+                }
                 self.check(caller, Action::AllowHost { name: &name, host: &host })?;
                 let mut core = self.open_core()?;
                 let secret = core.vault.secret(&id, &item.id)?;
@@ -387,10 +397,7 @@ impl Broker {
         self.check(caller, Action::ReplaceItem { name })?;
         let mut core = self.open_core()?;
         let stored = core.vault.secret(&id, &current.id)?;
-        let mut secret = secret.unwrap_or_else(|| stored.clone());
-        if let (Secret::Login { totp: given @ None, .. }, Secret::Login { totp: kept, .. }) = (&mut secret, &stored) {
-            given.clone_from(kept);
-        }
+        let secret = keep_setup_key(secret.unwrap_or_else(|| stored.clone()), &stored);
         core.vault.replace(&id, &current.id, &meta, &secret)?;
         core.vault.record("edit", name, caller.name())?;
         Ok(Response::Ok)
@@ -425,10 +432,12 @@ impl Broker {
                 core.vault.record("add", &name, caller.name())?;
             }
             Some(_) if !replace => return Err(Error::Exists(name)),
+            Some(item) if item.meta.kind != meta.kind => return Err(Error::Invalid("an item cannot change kind")),
             Some(item) => {
                 self.check(caller, Action::ReplaceItem { name: &name })?;
                 let mut core = self.open_core()?;
-                core.vault.replace(&id, &item.id, &meta, secret)?;
+                let secret = keep_setup_key(secret.clone(), &core.vault.secret(&id, &item.id)?);
+                core.vault.replace(&id, &item.id, &meta, &secret)?;
                 core.vault.record("replace", &name, caller.name())?;
             }
         }
@@ -460,12 +469,17 @@ impl Broker {
             let id = resolve_space(&core.vault, caller, space)?;
             (id, space_name(&core.vault, &id))
         };
+        if seconds == 0 {
+            return Err(Error::Invalid("a grant has to last some time, like 30 minutes"));
+        }
+        if seconds > MAX_GRANT_SECONDS {
+            return Err(Error::Invalid("a grant lasts at most 24 hours"));
+        }
         let agent = super::grants::sanitize(agent);
-        let seconds = seconds.min(MAX_GRANT_SECONDS);
         self.approve_grant(caller, id, &target, &agent, seconds, reason)?;
         let mut core = self.open_core()?;
         let (token, grant) = core.grants.issue(agent, id, std::time::Duration::from_secs(seconds));
         core.vault.record("grant", &target, &grant.agent)?;
-        Ok(Response::Granted { token, id: grant.id, seconds })
+        Ok(Response::Granted { token, id: grant.id, seconds, space: target })
     }
 }

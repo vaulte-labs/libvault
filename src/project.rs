@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::Result;
 use crate::env_file::parse as parse_env_file;
+use crate::{Error, Result};
 
 const LINK_FILE: &str = ".lv";
 const SKIPPED: &[&str] = &["node_modules", "target", ".git", "dist", "build", ".next", "vendor"];
@@ -15,12 +15,24 @@ pub fn link_folder(dir: &Path, space: &str) -> Result<()> {
     Ok(())
 }
 
-/// The space linked to `dir` or its nearest linked parent.
-pub fn linked_space(dir: &Path) -> Option<String> {
-    dir.ancestors().find_map(|dir| {
-        let text = fs::read_to_string(dir.join(LINK_FILE)).ok()?;
-        text.lines().find_map(|line| Some(line.strip_prefix("space")?.trim_start_matches([' ', '=']).trim().to_owned()))
-    })
+/// A folder's link to a space, and the file that makes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Linked {
+    pub space: String,
+    pub file: PathBuf,
+}
+
+/// The space linked to `dir` or its nearest linked parent. A link file that names no space is an
+/// error rather than no link, or its folder's secrets would quietly go to another space.
+pub fn linked_space(dir: &Path) -> Result<Option<Linked>> {
+    let Some(file) = dir.ancestors().map(|dir| dir.join(LINK_FILE)).find(|file| file.is_file()) else { return Ok(None) };
+    let text = fs::read_to_string(&file)
+        .map_err(|error| Error::Unreadable(format!("{} could not be read: {}", file.display(), crate::error::reason(&error))))?;
+    let space = text.lines().find_map(|line| Some(line.trim().strip_prefix("space")?.trim_start().strip_prefix('=')?.trim().to_owned()));
+    match space {
+        Some(space) if !space.is_empty() => Ok(Some(Linked { space, file })),
+        _ => Err(Error::Unreadable(format!("{} names no space. It holds one line, like: space = Work", file.display()))),
+    }
 }
 
 /// A `.env` file on disk. Holds a count, never a value.
@@ -84,7 +96,14 @@ mod tests {
         let nested = dir.path().join("a/b");
         fs::create_dir_all(&nested).unwrap();
         link_folder(dir.path(), "project-a").unwrap();
-        assert_eq!(linked_space(&nested).as_deref(), Some("project-a"));
+        assert_eq!(linked_space(&nested).unwrap().map(|linked| linked.space).as_deref(), Some("project-a"));
+    }
+
+    #[test]
+    fn a_link_file_that_names_no_space_is_an_error_not_no_link() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(LINK_FILE), "spaces: Work\n").unwrap();
+        assert!(linked_space(dir.path()).unwrap_err().to_string().contains("names no space"));
     }
 
     #[test]

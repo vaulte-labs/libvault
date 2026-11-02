@@ -15,6 +15,7 @@ mod codes;
 mod fill_requests;
 mod grants;
 mod handlers;
+mod history;
 mod linking;
 mod login;
 mod manage;
@@ -25,6 +26,7 @@ mod proxy;
 mod runs;
 mod shared_socket;
 mod signup;
+mod spaces;
 mod sync;
 
 use std::fs::Permissions;

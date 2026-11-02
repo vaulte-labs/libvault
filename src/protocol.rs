@@ -140,6 +140,13 @@ pub enum Request {
     SpaceAdd {
         name: String,
     },
+    SpaceRename {
+        name: String,
+        to: String,
+    },
+    SpaceRemove {
+        name: String,
+    },
     List {
         space: Option<String>,
     },
@@ -339,13 +346,14 @@ pub enum Response {
     Ok,
     Status(StatusInfo),
     Spaces { spaces: Vec<String> },
+    Space { name: String },
     Items { items: Vec<ItemInfo> },
     Item { item: ItemInfo },
     Secret { secret: Secret },
     Code(CurrentCode),
     Codes { codes: Vec<SpaceCode> },
     Icon { png: Option<Vec<u8>> },
-    Granted { token: String, id: String, seconds: u64 },
+    Granted { token: String, id: String, seconds: u64, space: String },
     Grants { grants: Vec<GrantInfo> },
     Undone { names: Vec<String> },
     Devices { devices: Vec<DeviceInfo> },

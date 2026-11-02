@@ -105,7 +105,7 @@ fn only_a_login_with_two_factor_has_a_code() {
 fn a_session_cannot_read_a_code() {
     let vault = Vault::new();
     with_two_factor(&vault);
-    let (token, _) = vault.client().grant(None, "agent", Duration::from_secs(60), None).unwrap();
+    let token = vault.client().grant(None, "agent", Duration::from_secs(60), None).unwrap().token;
     let mut session = Client::connect(&vault.home, options(Some(&token))).unwrap();
     assert_eq!(code(session.code(None, "github.com")), ErrorCode::Denied);
 }
@@ -222,7 +222,7 @@ fn an_edit_takes_a_touch() {
 fn a_session_needs_the_same_touch_to_edit() {
     let vault = Vault::new();
     vault.add_env("KEY", "value", None);
-    let (token, _) = vault.client().grant(None, "agent", Duration::from_secs(60), None).unwrap();
+    let token = vault.client().grant(None, "agent", Duration::from_secs(60), None).unwrap().token;
     let mut session = Client::connect(&vault.home, options(Some(&token))).unwrap();
     let mut meta = session.item(None, "KEY").unwrap().meta;
     meta.name = "RENAMED".to_owned();
@@ -296,7 +296,7 @@ fn a_session_hears_only_about_its_own_space() {
     add_card(&mut client, "Personal card", "01/20");
     let (meta, secret) = card("Work card", "01/20");
     client.add(Some("Work"), meta, secret, false).unwrap();
-    let (token, _) = client.grant(Some("Work"), "agent", Duration::from_secs(60), None).unwrap();
+    let token = client.grant(Some("Work"), "agent", Duration::from_secs(60), None).unwrap().token;
     let mut session = Client::connect(&vault.home, options(Some(&token))).unwrap();
     let expiring = session.expiring().unwrap();
     assert_eq!(expiring.iter().map(|item| item.meta.name.as_str()).collect::<Vec<_>>(), ["Work card"]);

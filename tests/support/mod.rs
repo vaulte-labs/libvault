@@ -102,7 +102,7 @@ impl Vault {
     }
 
     pub fn session(&self, space: &str, agent: &str) -> String {
-        self.client().grant(Some(space), agent, std::time::Duration::from_secs(3600), None).unwrap().0
+        self.client().grant(Some(space), agent, std::time::Duration::from_secs(3600), None).unwrap().token
     }
 
     /// Cuts direct contact with other devices, as if out of range. Brokers otherwise find each

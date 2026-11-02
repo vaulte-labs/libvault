@@ -6,6 +6,8 @@ use std::io;
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     Error,
+    /// The request itself was wrong, such as an argument that cannot be right.
+    Usage,
     Locked,
     /// Locked too, in that nothing happens without a person, but this one can be answered by asking
     /// them for a passphrase and trying again.
@@ -23,6 +25,7 @@ impl ErrorCode {
     pub fn exit_code(self) -> u8 {
         match self {
             Self::Error | Self::NeedsHost | Self::Outdated => 1,
+            Self::Usage => 2,
             Self::Locked | Self::NeedsPassphrase => 3,
             Self::Denied => 4,
             Self::NotFound => 5,
@@ -64,7 +67,7 @@ pub enum Error {
     Invalid(&'static str),
     #[error("{0}")]
     Usage(&'static str),
-    #[error("the broker is unavailable: {0}")]
+    #[error("Vaulte could not be reached: {0}")]
     BrokerUnavailable(&'static str),
     #[error("no allowed host for {0}, so nothing could use it")]
     NoHost(String),
@@ -86,8 +89,9 @@ pub enum Error {
     Newer,
     #[error("not approved: {0}")]
     NotApproved(&'static str),
-    #[error("a passphrase is needed to open this vault")]
-    PassphraseNeeded,
+    /// Holds what the passphrase would approve, as a touch prompt would name it.
+    #[error("a passphrase is needed to {0}")]
+    PassphraseNeeded(String),
     #[error("{0}")]
     NeedsPerson(&'static str),
     #[error("{message}")]
@@ -100,7 +104,8 @@ impl Error {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::Locked | Self::TimedOut => ErrorCode::Locked,
-            Self::PassphraseNeeded => ErrorCode::NeedsPassphrase,
+            Self::PassphraseNeeded(_) => ErrorCode::NeedsPassphrase,
+            Self::Usage(_) => ErrorCode::Usage,
             Self::Cancelled | Self::NotApproved(_) => ErrorCode::Denied,
             Self::NotFound(_) | Self::NoVault => ErrorCode::NotFound,
             Self::NeedsPerson(_) => ErrorCode::NeedsPerson,
@@ -112,3 +117,12 @@ impl Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// What went wrong with a file or a connection, in the system's words without its error number,
+/// to follow the path or address it concerns.
+pub(crate) fn reason(error: &io::Error) -> String {
+    let text = error.to_string();
+    let text = text.split(" (os error").next().unwrap_or_default();
+    let mut chars = text.chars();
+    chars.next().map(|first| first.to_lowercase().chain(chars).collect()).unwrap_or_default()
+}

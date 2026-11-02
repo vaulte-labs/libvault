@@ -69,8 +69,29 @@ pub struct SyncReport {
     pub backup_problems: Vec<String>,
 }
 
+/// A session a grant gave. `token` goes in `Connect::session`; `id` ends it early.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Granted {
+    pub token: String,
+    pub id: String,
+    pub space: String,
+    pub seconds: u64,
+}
+
+/// One version of an item, oldest first, as `restore` numbers them from 0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryInfo {
     pub at_ms: u64,
     pub deleted: bool,
+    /// The item's name in this version, or the last it had before it was deleted.
+    #[serde(default)]
+    pub name: String,
+    /// What this version changed from the one before, in the words `Meta` uses: `name`,
+    /// `username`, `urls`, `hosts`, `two_factor`, or `secret` when only the secret can have.
+    /// Empty for the first version, a deletion, and a version restored from deletion.
+    #[serde(default)]
+    pub changed: Vec<String>,
+    /// Whether this is what the item holds now. A deleted item has no current version.
+    #[serde(default)]
+    pub current: bool,
 }

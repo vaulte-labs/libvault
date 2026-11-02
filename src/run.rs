@@ -45,12 +45,14 @@ pub fn run(client: &mut Client, command: &[OsString], options: &RunOptions) -> R
 
     let mut child = Command::new(program);
     child.args(arguments).envs(env.iter().map(|(name, value)| (name, value)));
+    let not_started =
+        |error: std::io::Error| Error::Unreadable(format!("{} could not be started: {}", program.to_string_lossy(), crate::error::reason(&error)));
     let code = if scrub.is_empty() {
-        let mut child = child.spawn()?;
+        let mut child = child.spawn().map_err(not_started)?;
         crate::sys::ignore_interrupt();
         exit_code(child.wait()?)
     } else {
-        let mut child = child.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        let mut child = child.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(not_started)?;
         crate::sys::ignore_interrupt();
         let stdout = child.stdout.take().map(|stream| scrub_stream(stream, std::io::stdout(), scrub.clone()));
         let stderr = child.stderr.take().map(|stream| scrub_stream(stream, std::io::stderr(), scrub.clone()));

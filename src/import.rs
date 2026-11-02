@@ -8,7 +8,8 @@ use zeroize::Zeroizing;
 
 use crate::env_file::parse as parse_env_file;
 use crate::ids::SpaceId;
-use crate::item::{Kind, Meta, Secret, printable};
+use crate::item::{Kind, Meta, Secret, check_site, printable};
+use crate::totp::Totp;
 use crate::vault::Vault;
 use crate::{Error, Result};
 
@@ -22,15 +23,13 @@ pub struct ImportFile {
 impl ImportFile {
     /// Reads a `.csv` as an Apple Passwords export, and anything else as a `.env` file.
     pub fn read(path: &Path) -> Result<Self> {
-        let text = String::from_utf8(std::fs::read(path)?).map_err(|_| Error::Unreadable("that file is not UTF-8 text".to_owned()))?;
+        let bytes = std::fs::read(path)
+            .map_err(|error| Error::Unreadable(format!("{} could not be read: {}", path.display(), crate::error::reason(&error))))?;
+        let text = String::from_utf8(bytes).map_err(|_| Error::Unreadable(format!("{} is not UTF-8 text", path.display())))?;
         if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("csv")) {
             let parsed = parse_apple_passwords(&text);
             if parsed.logins.is_empty() && parsed.unreadable_rows.is_empty() {
-                // Not the columns themselves: a file with no header has someone's password here.
-                return Err(Error::Unreadable(format!(
-                    "this is not an Apple Passwords export. It has {} columns, and not the ones expected",
-                    parsed.columns.len()
-                )));
+                return Err(Error::Unreadable(format!("{} is not an Apple Passwords export: {}", path.display(), missing_columns(&parsed.columns))));
             }
             let items = parsed.logins.into_iter().map(|login| (login.meta, login.secret)).collect();
             return Ok(Self { items, unreadable: parsed.unreadable_rows });
@@ -39,6 +38,14 @@ impl ImportFile {
         let items = parsed.vars.iter().map(|var| (Meta::env(var.name.clone()), Secret::Env { value: var.value.to_string() })).collect();
         Ok(Self { items, unreadable: parsed.unreadable_lines })
     }
+}
+
+/// Which of the columns an export needs a first row lacks. Only names it expects are ever shown:
+/// a file with no header row has someone's password where its column names would be.
+fn missing_columns(columns: &[String]) -> String {
+    let missing: Vec<&str> =
+        REQUIRED_COLUMNS.iter().copied().filter(|wanted| !columns.iter().any(|column| column.eq_ignore_ascii_case(wanted))).collect();
+    format!("its first row has {} columns, and none named {}", columns.len(), missing.join(", "))
 }
 
 /// What an import did. Identical items are skipped, and a clashing name gets a suffix, so an
@@ -62,17 +69,28 @@ impl Vault {
         let mut imported = Imported::default();
         let mut fresh: Vec<(Meta, Secret)> = Vec::with_capacity(items.len());
         for (mut meta, secret) in items {
-            let same = |(name, value): &(String, Secret)| *name == meta.name && *value == secret;
-            if existing.iter().any(same) || fresh.iter().any(|(other, value)| other.name == meta.name && *value == secret) {
-                imported.skipped += 1;
-                continue;
-            }
+            // An earlier import of this same item may have got a suffix, so each name it could
+            // have been given is checked for it too.
             let base = meta.name.clone();
             let mut suffix = 1;
-            while existing.iter().any(|(name, _)| *name == meta.name) || fresh.iter().any(|(other, _)| other.name == meta.name) {
+            let identical = loop {
+                let held: Vec<&Secret> = existing
+                    .iter()
+                    .map(|(name, value)| (name, value))
+                    .chain(fresh.iter().map(|(other, value)| (&other.name, value)))
+                    .filter(|(name, _)| **name == meta.name)
+                    .map(|(_, value)| value)
+                    .collect();
+                if held.is_empty() || held.contains(&&secret) {
+                    break !held.is_empty();
+                }
                 suffix += 1;
                 // A variable's name has to stay one a shell can use.
                 meta.name = if meta.kind == Kind::Env { format!("{base}_{suffix}") } else { format!("{base} {suffix}") };
+            };
+            if identical {
+                imported.skipped += 1;
+                continue;
             }
             imported.renamed += usize::from(suffix > 1);
             fresh.push((meta, secret));
@@ -84,6 +102,8 @@ impl Vault {
         Ok(imported)
     }
 }
+
+const REQUIRED_COLUMNS: [&str; 4] = ["Title", "URL", "Username", "Password"];
 
 /// One login from the export.
 #[derive(Debug)]
@@ -141,7 +161,8 @@ pub(crate) fn parse_apple_passwords(text: &str) -> ApplePasswords {
     let column = |name: &str| columns.iter().position(|column| column.eq_ignore_ascii_case(name));
 
     let mut parsed = ApplePasswords::default();
-    let (Some(title), Some(url), Some(username), Some(password)) = (column("Title"), column("URL"), column("Username"), column("Password")) else {
+    let [title, url, username, password] = REQUIRED_COLUMNS.map(column);
+    let (Some(title), Some(url), Some(username), Some(password)) = (title, url, username, password) else {
         parsed.columns = columns;
         return parsed;
     };
@@ -161,10 +182,17 @@ pub(crate) fn parse_apple_passwords(text: &str) -> ApplePasswords {
         let name = printable(if row[title].is_empty() { &row[url] } else { &row[title] });
         let mut meta = Meta::new(Kind::Login, name);
         meta.username = Some(printable(&row[username])).filter(|username| !username.is_empty());
-        if !row[url].is_empty() {
-            meta.urls.push(printable(&row[url]));
-        }
+        let site = printable(&row[url]);
+        let site = if site.is_empty() || site.contains("://") { site } else { format!("https://{site}") };
         let totp = otp.map(|index| row[index].to_string()).filter(|code| !code.is_empty());
+        // What the vault would refuse is named by its row, so it cannot stop the rest.
+        if !site.is_empty() && check_site(&site).is_err() || totp.as_deref().is_some_and(|key| Totp::parse(key).is_err()) {
+            parsed.unreadable_rows.push(number);
+            continue;
+        }
+        if !site.is_empty() {
+            meta.urls.push(site);
+        }
         parsed.logins.push(AppleLogin { meta, secret: Secret::Login { password: row[password].to_string(), totp } });
     }
     parsed.columns = columns;
@@ -179,14 +207,14 @@ mod tests {
 
     #[test]
     fn reads_a_login_with_two_factor() {
-        let csv = format!("{HEADER}GitHub,https://github.com,me,hunter2,,otpauth://totp/x?secret=ABC\n");
+        let csv = format!("{HEADER}GitHub,https://github.com,me,hunter2,,otpauth://totp/x?secret=JBSWY3DPEHPK3PXP\n");
         let parsed = parse_apple_passwords(&csv);
         assert_eq!(parsed.logins.len(), 1);
         let login = &parsed.logins[0];
         assert_eq!(login.meta.name, "GitHub");
         assert_eq!(login.meta.username.as_deref(), Some("me"));
         assert_eq!(login.meta.urls, ["https://github.com"]);
-        assert_eq!(login.secret, Secret::Login { password: "hunter2".to_owned(), totp: Some("otpauth://totp/x?secret=ABC".to_owned()) });
+        assert_eq!(login.secret, Secret::Login { password: "hunter2".to_owned(), totp: Some("otpauth://totp/x?secret=JBSWY3DPEHPK3PXP".to_owned()) });
     }
 
     #[test]

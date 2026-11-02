@@ -28,7 +28,7 @@ impl Client {
         let stream = UnixStream::connect(socket).map_err(|_| Error::BrokerUnavailable("it is not running. Open Vaulte and try again"))?;
         let passphrase = options.passphrase.map(|passphrase| Zeroizing::new(passphrase.to_owned()));
         // A sandbox cannot start a broker, so it can replace none.
-        Ok(Self { stream, session: options.session.map(str::to_owned), passphrase, upgrade: None })
+        Ok(Self { stream, session: options.session.map(str::to_owned), passphrase, upgrade: None, ask_passphrase: None })
     }
 
     /// Signs in with a saved login in a browser nothing else can reach, and hands over only the
