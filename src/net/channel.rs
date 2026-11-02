@@ -28,6 +28,8 @@ pub(super) const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const SESSION_TIMEOUT: Duration = Duration::from_mins(20);
 
 const BROKEN: Error = Error::Peer("the connection to the other device failed");
+/// Most often a person at the other device who has not answered yet.
+const SILENT: Error = Error::Peer("the other device did not answer in time");
 
 #[derive(Debug)]
 pub(crate) struct Channel {
@@ -54,13 +56,15 @@ fn read_by(stream: &mut TcpStream, buffer: &mut [u8], deadline: Instant) -> Resu
     while filled < buffer.len() {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Err(BROKEN);
+            return Err(SILENT);
         }
         stream.set_read_timeout(Some(left))?;
         match stream.read(&mut buffer[filled..]) {
             Ok(0) => return Err(BROKEN),
             Ok(read) => filled += read,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            // A read timeout is WouldBlock on Unix and TimedOut on Windows.
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => return Err(SILENT),
             Err(error) => return Err(error.into()),
         }
     }
@@ -190,6 +194,14 @@ mod tests {
         let connecting = std::thread::spawn(move || Channel::initiate(TcpStream::connect(address).unwrap(), &[1; 32], b"test", None).unwrap());
         let (stream, _) = listener.accept().unwrap();
         (Channel::respond(stream, &[2; 32], b"test", None).unwrap(), connecting.join().unwrap())
+    }
+
+    #[test]
+    fn a_device_that_never_answers_is_named_as_such_not_as_a_system_error() {
+        let (mut waiting, _quiet) = pair();
+        waiting.wait_up_to(Duration::from_millis(100));
+        let error = waiting.recv(16).unwrap_err();
+        assert!(matches!(error, Error::Peer("the other device did not answer in time")), "{error}");
     }
 
     #[test]
