@@ -121,7 +121,11 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// What went wrong with a file or a connection, in the system's words without its error number,
 /// to follow the path or address it concerns.
 pub(crate) fn reason(error: &io::Error) -> String {
-    let text = error.to_string();
+    reason_text(&error.to_string())
+}
+
+/// As `reason`, for an error that has already become its message.
+pub(crate) fn reason_text(text: &str) -> String {
     let text = text.split(" (os error").next().unwrap_or_default();
     let mut chars = text.chars();
     chars.next().map(|first| first.to_lowercase().chain(chars).collect()).unwrap_or_default()

@@ -3,7 +3,7 @@
 
 use super::{Client, UNEXPECTED};
 use crate::protocol::{RelayIssuer, Request, Response};
-use crate::{DeviceInfo, LockSettings, Result};
+use crate::{DeviceInfo, Error, LockSettings, Result};
 
 impl Client {
     pub fn devices(&mut self) -> Result<Vec<DeviceInfo>> {
@@ -26,9 +26,16 @@ impl Client {
     /// Starts adding a device, at `address` or found on the local network, and returns the words
     /// both screens should show. Dropping this client abandons it.
     pub fn begin_pairing(&mut self, address: Option<&str>) -> Result<[String; 3]> {
-        match self.call(Request::PairBegin { address: address.map(str::to_owned) })? {
-            Response::Pairing { words } => Ok(words),
-            _ => Err(UNEXPECTED),
+        match self.call(Request::PairBegin { address: address.map(str::to_owned) }) {
+            Ok(Response::Pairing { words }) => Ok(words),
+            Ok(_) => Err(UNEXPECTED),
+            // A connection that failed comes back in the system's words alone, so the address the
+            // person gave goes with them.
+            Err(Error::Broker { code, message }) if message.contains("(os error") => {
+                let place = address.unwrap_or("the new device");
+                Err(Error::Broker { code, message: format!("{place} could not be reached: {}", crate::error::reason_text(&message)) })
+            }
+            Err(error) => Err(error),
         }
     }
 

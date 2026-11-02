@@ -384,8 +384,10 @@ fn passphrase_reason(message: &str) -> &str {
     message.strip_prefix("a passphrase is needed to ").unwrap_or("open this vault")
 }
 
+/// The broker runs elsewhere, so it is handed whole paths, and clean ones, since it keeps some to
+/// show: `./usb` is the folder `usb` here.
 fn absolute(path: &Path) -> Result<PathBuf> {
-    Ok(if path.is_absolute() { path.to_path_buf() } else { std::env::current_dir()?.join(path) })
+    Ok(std::path::absolute(path)?)
 }
 
 const UNEXPECTED: Error = Error::BrokerUnavailable("it sent an unexpected reply");
