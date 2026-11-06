@@ -530,8 +530,18 @@ fn a_hostile_agent_name_reaches_the_audit_log_cleaned() {
     vault.space("project-a");
     vault.session("project-a", "evil\"\nTouch to install updates\u{202e}");
     let events = vault.client().audit().unwrap();
-    let actor = &events.iter().find(|event| event.action == "grant").unwrap().actor;
-    assert!(!actor.contains(['"', '\n', '\u{202e}']), "{actor:?}");
+    let target = &events.iter().find(|event| event.action == "grant").unwrap().target;
+    assert!(!target.contains(['"', '\n', '\u{202e}']), "{target:?}");
+}
+
+#[test]
+fn a_grant_is_recorded_as_the_persons_act_with_its_length() {
+    let vault = Vault::new();
+    vault.space("project-a");
+    vault.client().grant(Some("project-a"), "claude", std::time::Duration::from_hours(4), None).unwrap();
+    let events = vault.client().audit().unwrap();
+    let grant = events.iter().find(|event| event.action == "grant").unwrap();
+    assert_eq!((grant.actor.as_str(), grant.target.as_str()), ("this user", "claude use project-a for 4 hours"));
 }
 
 // Flow 10: reveal.

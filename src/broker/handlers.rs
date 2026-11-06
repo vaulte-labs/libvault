@@ -473,7 +473,8 @@ impl Broker {
         self.approve_grant(caller, id, &target, &agent, seconds, reason)?;
         let mut core = self.open_core()?;
         let (token, grant) = core.grants.issue(agent, id, std::time::Duration::from_secs(seconds));
-        core.vault.record("grant", &target, &grant.agent)?;
+        // The person's act, worded to follow "let": "claude use Work for 4 hours".
+        core.vault.record("grant", &format!("{} use {target} for {}", grant.agent, human_duration(seconds)), caller.name())?;
         Ok(Response::Granted { token, id: grant.id, seconds, space: target })
     }
 }
