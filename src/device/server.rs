@@ -10,7 +10,8 @@ use crate::crypto::{self, PublicKeys};
 use crate::wire::{Reader, Writer};
 use crate::{Error, Result};
 
-const NOBODY_HERE: Error = Error::NeedsPerson("nobody is at this server to approve that. Approve it on another device");
+/// No other device is asked on a server's behalf, so the person does it on one of theirs.
+const NOBODY_HERE: Error = Error::NeedsPerson("nobody is at this server to approve that. Do it on another of your devices");
 
 /// Software keys sealed under a random secret kept beside them. Sealing them protects nothing a
 /// read of the file would not get, and it keeps one way of holding keys in software.
