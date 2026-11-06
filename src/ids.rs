@@ -51,6 +51,25 @@ impl BatchId {
         let hash = crate::crypto::hash(&[b"vaulte undo", &batch.0]);
         Self(hash[..16].try_into().expect("a hash is longer than an id"))
     }
+
+    /// A batch for a `restore`: random in its first half, and the second half derived from it, so
+    /// the log alone says a version was restored, as it does for an undo. A random id lands on
+    /// this by chance once in 2^64.
+    pub(crate) fn restoring() -> Self {
+        Self::restoring_from(crate::crypto::random())
+    }
+
+    pub(crate) fn is_restoring(self) -> bool {
+        self == Self::restoring_from(self.0[..8].try_into().expect("an id is 16 bytes"))
+    }
+
+    fn restoring_from(half: [u8; 8]) -> Self {
+        let hash = crate::crypto::hash(&[b"vaulte restore", &half]);
+        let mut bytes = [0; 16];
+        bytes[..8].copy_from_slice(&half);
+        bytes[8..].copy_from_slice(&hash[..8]);
+        Self(bytes)
+    }
 }
 
 /// One generation of a rotating key, such as an epoch or a version of a space. The author is part

@@ -25,6 +25,8 @@ pub(super) fn history_info(entries: &[HistoryEntry]) -> Vec<HistoryInfo> {
                     _ => Vec::new(),
                 },
                 current: index == newest && entry.meta.is_some(),
+                restored: entry.restored,
+                identical: entry.identical,
             }
         })
         .collect()
@@ -51,7 +53,7 @@ mod tests {
     use crate::item::Kind;
 
     fn entry(meta: Option<Meta>) -> HistoryEntry {
-        HistoryEntry { clock: 0, device: DeviceId::from([0; 16]), meta }
+        HistoryEntry { clock: 0, device: DeviceId::from([0; 16]), meta, restored: false, identical: false }
     }
 
     #[test]

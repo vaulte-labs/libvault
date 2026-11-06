@@ -24,6 +24,10 @@ pub struct HistoryEntry {
     pub clock: u64,
     pub device: DeviceId,
     pub meta: Option<Meta>,
+    /// Written by a `restore` or an `undo`, bringing back what the item held before.
+    pub restored: bool,
+    /// Holds what the item holds now, listing and secret alike. Never so for a deleted item.
+    pub identical: bool,
 }
 
 impl Vault {
@@ -107,7 +111,7 @@ impl Vault {
     /// Replaces an item. The old version stays in history.
     pub fn replace(&mut self, space: &SpaceId, id: &ItemId, meta: &Meta, secret: &Secret) -> Result<()> {
         self.require(space, id)?;
-        self.write_everywhere(space, id, meta, secret)
+        self.write_everywhere(space, id, BatchId::random(), meta, secret)
     }
 
     /// Deletes items, each from one space, as one change. A copy in another space stays. They stay
@@ -126,27 +130,39 @@ impl Vault {
     pub fn secret(&self, space: &SpaceId, id: &ItemId) -> Result<Secret> {
         self.keys.as_ref().ok_or(Error::Locked)?;
         let not_found = || Error::NotFound("that item".to_owned());
-        for entry in self.state.items.get(&(*space, *id)).ok_or_else(not_found)?.iter().rev() {
+        self.secret_of(space, id, self.state.items.get(&(*space, *id)).ok_or_else(not_found)?).ok_or_else(not_found)
+    }
+
+    /// The secret of the newest of `versions` that can be read, or `None` when the item was deleted.
+    fn secret_of(&self, space: &SpaceId, id: &ItemId, versions: &[Version]) -> Option<Secret> {
+        for entry in versions.iter().rev() {
             let Change::Put { version, secret, .. } = &entry.change else { break };
             let key = self.space_key(space, *version);
             let opened = key.and_then(|key| crypto::open(&key, &self.binding(space, id, *version, Part::Secret), secret));
             if let Some(secret) = opened.ok().and_then(|opened| item::decode(&opened).ok()) {
-                return Ok(secret);
+                return Some(secret);
             }
         }
-        Err(not_found())
+        None
     }
 
     /// Every version of an item, oldest first. `meta` is `None` for a deletion.
     pub fn history(&self, space: &SpaceId, id: &ItemId) -> Result<Vec<HistoryEntry>> {
         let versions = self.state.items.get(&(*space, *id)).ok_or(Error::NotFound("that item".to_owned()))?;
         let mut key_for = |version| self.space_key(space, version);
+        let now = self.meta_of(&mut key_for, space, id, versions);
         versions
             .iter()
             .enumerate()
             .map(|(index, version)| {
                 let meta = self.meta_of(&mut key_for, space, id, &versions[..=index]);
-                Ok(HistoryEntry { clock: version.clock, device: version.device, meta })
+                let undo = versions[..index].iter().any(|earlier| BatchId::undoing(earlier.batch) == version.batch);
+                let restored = meta.is_some() && (undo || version.batch.is_restoring());
+                // The listing first: it is open already, and most versions differ there.
+                let identical = meta.is_some()
+                    && meta == now
+                    && (index + 1 == versions.len() || self.secret_of(space, id, &versions[..=index]) == self.secret_of(space, id, versions));
+                Ok(HistoryEntry { clock: version.clock, device: version.device, meta, restored, identical })
             })
             .collect()
     }
@@ -174,7 +190,7 @@ impl Vault {
         let key = self.space_key(space, *generation)?;
         let meta: Meta = item::decode(&crypto::open(&key, &self.binding(space, id, *generation, Part::Meta), meta)?)?;
         let secret: Secret = item::decode(&crypto::open(&key, &self.binding(space, id, *generation, Part::Secret), secret)?)?;
-        self.write_everywhere(space, id, &meta, &secret)
+        self.write_everywhere(space, id, BatchId::restoring(), &meta, &secret)
     }
 
     /// Reverses this device's most recent change that is not undone yet, so each undo goes one

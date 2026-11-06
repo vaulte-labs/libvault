@@ -70,14 +70,13 @@ impl Vault {
     }
 
     /// Writes one version of the item `id` to `space` and every other space holding it, as one
-    /// batch, so one `undo` takes them all back. A device has to hold every one of those spaces,
+    /// `batch`, so one `undo` takes them all back. A device has to hold every one of those spaces,
     /// or the copies would part.
-    pub(crate) fn write_everywhere(&mut self, space: &SpaceId, id: &ItemId, meta: &Meta, secret: &Secret) -> Result<()> {
+    pub(crate) fn write_everywhere(&mut self, space: &SpaceId, id: &ItemId, batch: BatchId, meta: &Meta, secret: &Secret) -> Result<()> {
         let mut spaces = self.copies_of(id);
         if !spaces.contains(space) {
             spaces.push(*space);
         }
-        let batch = BatchId::random();
         let mut bodies = Vec::with_capacity(spaces.len());
         for space in spaces {
             if self.find(&space, &meta.name).is_ok_and(|found| found.id != *id) {

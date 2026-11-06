@@ -80,6 +80,7 @@ pub struct Granted {
 
 /// One version of an item, oldest first, as `restore` numbers them from 0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools, reason = "each answers its own question an interface shows")]
 pub struct HistoryInfo {
     pub at_ms: u64,
     pub deleted: bool,
@@ -94,4 +95,11 @@ pub struct HistoryInfo {
     /// Whether this is what the item holds now. A deleted item has no current version.
     #[serde(default)]
     pub current: bool,
+    /// Written by a restore or an undo, bringing back an earlier version.
+    #[serde(default)]
+    pub restored: bool,
+    /// Holds exactly what the item holds now, so restoring it would change nothing. True of the
+    /// current version, and of no version of a deleted item.
+    #[serde(default)]
+    pub identical: bool,
 }

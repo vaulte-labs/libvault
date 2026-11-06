@@ -372,3 +372,22 @@ fn every_code_at_once_takes_a_touch_and_no_session_gets_them() {
     allow();
 }
 
+#[test]
+fn history_says_what_a_restore_or_an_undo_brought_back_and_which_versions_match_now() {
+    let vault = Vault::new();
+    vault.add_env("KEY", "first", None);
+    let mut client = vault.client();
+    let meta = client.item(None, "KEY").unwrap().meta;
+    client.edit(None, "KEY", meta, Some(env("second")), false).unwrap();
+    client.restore(None, "KEY", 0).unwrap();
+    let flags = |client: &mut libvault::Client| -> Vec<(bool, bool)> {
+        client.history(None, "KEY").unwrap().iter().map(|version| (version.restored, version.identical)).collect()
+    };
+    assert_eq!(flags(&mut client), [(false, true), (false, false), (true, true)], "the first holds what the restore brought back");
+
+    client.undo().unwrap();
+    assert_eq!(flags(&mut client), [(false, false), (false, true), (true, false), (true, true)], "an undo brings back a version too");
+
+    client.remove(None, "KEY").unwrap();
+    assert!(client.history(None, "KEY").unwrap().iter().all(|version| !version.identical), "a deleted item holds nothing to match");
+}
