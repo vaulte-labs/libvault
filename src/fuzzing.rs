@@ -68,11 +68,18 @@ pub fn origin(data: &[u8]) {
     let middle = text.char_indices().map(|(at, _)| at).find(|at| *at >= text.len() / 2).unwrap_or(text.len());
     let (saved, page) = text.split_at(middle);
     if let Some(parsed) = fill::Origin::parse(page) {
-        // A login is for the host it names and what is under it, and never the reverse.
+        // A login is for its own site and no other owner's: the host it names, or one that shares
+        // its registrable domain, never an address.
         if fill::matches(saved, &parsed)
             && let Some(saved) = fill::Origin::parse(saved)
         {
-            assert!(parsed.host == saved.host || parsed.host.ends_with(&format!(".{}", saved.host)), "{saved:?} matched {parsed:?}");
+            fn site(host: &str) -> Option<&str> {
+                host.parse::<std::net::IpAddr>().is_err().then(|| psl::domain_str(host)).flatten()
+            }
+            assert!(
+                parsed.host == saved.host || site(&parsed.host).is_some_and(|page| site(&saved.host) == Some(page)),
+                "{saved:?} matched {parsed:?}"
+            );
         }
     }
 }

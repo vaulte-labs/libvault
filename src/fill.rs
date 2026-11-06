@@ -49,8 +49,11 @@ impl std::fmt::Display for Origin {
     }
 }
 
-/// Whether a login saved for `saved` may fill on `page`. The page may be the saved host or a
-/// subdomain of it, on the same scheme and port. Plain HTTP is allowed only on this machine.
+/// Whether a login saved for `saved` may fill on `page`: the same site, on the same scheme and
+/// port. A site is a registrable domain and every host under it, so a login saved for
+/// `www.example.com` fills on `login.example.com` and on `example.com`. Under a suffix many owners
+/// share, such as `github.io`, each name is its own site, and an address or a bare suffix is only
+/// itself. Plain HTTP is allowed only on this machine.
 pub fn matches(saved: &str, page: &Origin) -> bool {
     let Some(saved) = Origin::parse(saved) else { return false };
     if saved.scheme != page.scheme || saved.port != page.port {
@@ -59,17 +62,19 @@ pub fn matches(saved: &str, page: &Origin) -> bool {
     if page.scheme != "https" && !page.is_loopback() {
         return false;
     }
-    if saved.host == page.host {
-        return true;
-    }
-    is_registrable(&saved.host) && page.host.ends_with(&format!(".{}", saved.host))
+    saved.host == page.host || registrable_domain(&saved.host).is_some_and(|site| registrable_domain(&page.host) == Some(site))
 }
 
-/// Whether `host` is one site's own, so what lies under it is that site's too. A suffix many sites
-/// share, such as `com`, `co.uk` or `github.io`, belongs to none of them, and neither does an
-/// address.
+/// The part of `host` one owner registered, by the public suffix list: `example.com` for
+/// `login.example.com`, `alice.github.io` for `www.alice.github.io`. None for an address or a bare
+/// suffix such as `com`, `co.uk` or `github.io`, which belong to nobody.
+fn registrable_domain(host: &str) -> Option<&str> {
+    if host.parse::<std::net::IpAddr>().is_ok() { None } else { psl::domain_str(host) }
+}
+
+/// Whether `host` is one site's own, so what lies under it is that site's too.
 pub(crate) fn is_registrable(host: &str) -> bool {
-    host.parse::<std::net::IpAddr>().is_err() && psl::domain_str(host).is_some()
+    registrable_domain(host).is_some()
 }
 
 #[cfg(test)]
@@ -124,6 +129,37 @@ mod tests {
         assert!(!matches("https://co.uk", &page("https://evil.co.uk")));
         assert!(matches("https://alice.github.io", &page("https://www.alice.github.io")));
         assert!(matches("https://example.co.uk", &page("https://www.example.co.uk")));
+    }
+
+    #[test]
+    fn any_host_of_one_site_fills_on_any_other() {
+        for (saved, page_url) in [
+            ("https://www.example.com", "https://login.example.com/"),
+            ("https://example.com", "https://login.example.com/"),
+            ("https://login.example.com", "https://example.com/"),
+            ("https://login.example.com", "https://www.example.com/"),
+            ("https://shop.example.co.uk", "https://account.example.co.uk/"),
+            ("https://alice.github.io", "https://www.alice.github.io/"),
+            ("https://www.alice.github.io", "https://alice.github.io/"),
+        ] {
+            assert!(matches(saved, &page(page_url)), "{saved} on {page_url}");
+        }
+    }
+
+    #[test]
+    fn another_site_under_a_shared_suffix_or_another_scheme_or_port_does_not() {
+        for (saved, page_url) in [
+            ("https://a.github.io", "https://b.github.io/"),
+            ("https://www.a.github.io", "https://b.github.io/"),
+            ("https://example.co.uk", "https://other.co.uk/"),
+            ("https://www.example.com", "https://login.example.com.evil.com/"),
+            ("https://www.example.com", "https://login.examp1e.com/"),
+            ("https://www.example.com", "http://login.example.com/"),
+            ("https://www.example.com", "https://login.example.com:8443/"),
+            ("https://10.0.0.1", "https://10.0.0.2/"),
+        ] {
+            assert!(!matches(saved, &page(page_url)), "{saved} on {page_url}");
+        }
     }
 
     #[test]
