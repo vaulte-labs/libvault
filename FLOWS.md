@@ -158,7 +158,7 @@ or removing devices, so a laptop and a server need only the laptop.
 | Step | What happens |
 |---|---|
 | 1 | New device creates its enclave keys and listens. |
-| 2 | Existing device finds it on the network. Off-network, the new device shows a one-time code, such as `4821-7730-1956`, typed on the existing one in place of an address: the new device waits for it at Vaulte's relay, which lets a device being added wait there without a pass and only a paid device dial it. `a_device_on_another_network_joins_with_the_code_it_shows`, `a_device_joins_through_a_relay_that_asks_for_passes_with_only_the_adder_paid` |
+| 2 | Existing device finds it on the network. Off-network, the new device shows a one-time code, such as `4821-7730-1956`, typed on the existing one in place of an address: the new device waits for it at Vaulte's relay, which lets a device being added wait there without a pass and only a paid device dial it. It then keeps syncing through that relay. `a_device_on_another_network_joins_with_the_code_it_shows`, `a_device_joins_through_a_relay_that_asks_for_passes_with_only_the_adder_paid` |
 | 3 | Both show the same three words. |
 | 4 | Person compares and confirms on both, with a touch on each. |
 | 5 | With two or more enrolled devices, another device must also approve. |

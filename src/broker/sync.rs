@@ -13,7 +13,6 @@
 //! likes and must not hold up the devices.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,8 +23,9 @@ use super::Broker;
 use super::peers::Route;
 use crate::ids::DeviceId;
 use crate::net::{discovery, relay};
+use crate::places::{self, RELAY_PREFIX};
+use crate::store::Growth;
 use crate::store::log::now_ms;
-use crate::store::{Growth, write_private};
 use crate::sync::folder::{read_logs, vault_folder, write_logs};
 use crate::{BackupInfo, Error, Result};
 
@@ -43,9 +43,6 @@ const CATCH_UP: Duration = Duration::from_mins(15);
 const FIRST_RETRY: Duration = Duration::from_secs(10);
 /// How often every folder is read, for what other devices wrote there.
 const FOLDER_REFRESH: Duration = Duration::from_secs(30);
-/// How a peer address names a relay rather than a device.
-const RELAY_PREFIX: &str = "relay:";
-const PEERS_FILE: &str = "peers.json";
 
 /// Every place this device keeps in step with, and how each went. Part of `Core`, so it changes
 /// under the one lock like everything else.
@@ -137,15 +134,6 @@ impl Paced {
     }
 }
 
-/// The places a person gave: `host:port` for a device, `relay:host:port` for a relay.
-fn given(home: &Path) -> Result<Vec<String>> {
-    match fs::read(home.join("local").join(PEERS_FILE)) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| Error::Corrupt("the peer list is damaged")),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(error) => Err(error.into()),
-    }
-}
-
 fn resolve(address: &str) -> Option<SocketAddr> {
     address.to_socket_addrs().ok()?.next()
 }
@@ -153,13 +141,13 @@ fn resolve(address: &str) -> Option<SocketAddr> {
 impl Broker {
     /// The addresses a person gave, as they resolve now.
     fn given_addresses(&self) -> Vec<SocketAddr> {
-        let given = given(&self.home).unwrap_or_default();
+        let given = places::given(&self.home).unwrap_or_default();
         given.iter().filter(|place| !place.starts_with(RELAY_PREFIX)).filter_map(|address| resolve(address)).collect()
     }
 
     /// The relays a person gave.
     pub(super) fn relays(&self) -> Vec<String> {
-        let given = given(&self.home).unwrap_or_default();
+        let given = places::given(&self.home).unwrap_or_default();
         given.into_iter().filter_map(|place| place.strip_prefix(RELAY_PREFIX).map(str::to_owned)).collect()
     }
 
@@ -175,13 +163,7 @@ impl Broker {
         if !place.starts_with(RELAY_PREFIX) {
             self.core().places.addresses.entry(resolved).or_default();
         }
-        let mut places = given(&self.home)?;
-        if !places.iter().any(|existing| existing == place) {
-            places.push(place.to_owned());
-            let bytes = serde_json::to_vec(&places).map_err(|_| Error::Corrupt("the peer list could not be saved"))?;
-            write_private(&self.home.join("local").join(PEERS_FILE), &bytes)?;
-        }
-        Ok(())
+        places::remember(&self.home, place)
     }
 
     /// A route through each relay to each device not in `reached`, by the roster as it stands now.

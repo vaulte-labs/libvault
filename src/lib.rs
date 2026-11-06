@@ -44,6 +44,7 @@ mod locking;
 mod net;
 #[cfg(feature = "broker")]
 mod passkey;
+mod places;
 mod profile;
 mod project;
 mod protocol;

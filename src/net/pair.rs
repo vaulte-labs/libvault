@@ -135,8 +135,8 @@ pub struct Join {
     fresh: NewDevice,
     name: String,
     listener: TcpListener,
-    /// Devices that reached this one through a relay, by its code.
-    relayed: Option<mpsc::Receiver<TcpStream>>,
+    /// The relay waited at, and devices that reached this one through it by its code.
+    relayed: Option<(String, mpsc::Receiver<TcpStream>)>,
     stop: Arc<AtomicBool>,
 }
 
@@ -188,7 +188,7 @@ impl Join {
     /// in place of an address.
     pub fn wait_at_relay(&mut self, relay: &str) -> Result<String> {
         let digits = join_code::new_code();
-        self.relayed = Some(join_code::wait(relay, &digits, Arc::clone(&self.stop))?);
+        self.relayed = Some((relay.to_owned(), join_code::wait(relay, &digits, Arc::clone(&self.stop))?));
         Ok(join_code::shown(&digits))
     }
 
@@ -202,14 +202,15 @@ impl Join {
             if Instant::now() > deadline {
                 return Err(Error::Peer("no device with this vault connected. Add this one from a device that has it"));
             }
-            let stream = match self.listener.accept() {
-                Ok((stream, _)) => stream,
+            let (stream, relay) = match self.listener.accept() {
+                Ok((stream, _)) => (stream, None),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    let Some(stream) = self.relayed.as_ref().and_then(|relayed| relayed.try_recv().ok()) else {
+                    let Some((relay, stream)) = self.relayed.as_ref().and_then(|(relay, relayed)| Some((relay.clone(), relayed.try_recv().ok()?)))
+                    else {
                         std::thread::sleep(Duration::from_millis(20));
                         continue;
                     };
-                    stream
+                    (stream, Some(relay))
                 }
                 Err(error) => return Err(error.into()),
             };
@@ -220,7 +221,7 @@ impl Join {
             channel.wait_up_to(IO_TIMEOUT);
             self.stop.store(true, Ordering::Relaxed);
             let words = words_as_joiner(&mut channel, &committed)?;
-            return Ok(PendingJoin { join: self, channel, words });
+            return Ok(PendingJoin { join: self, channel, words, relay });
         }
     }
 }
@@ -237,6 +238,8 @@ pub struct PendingJoin {
     join: Join,
     channel: Channel,
     words: [String; 3],
+    /// The relay the other device came through, if it is on another network.
+    relay: Option<String>,
 }
 
 impl PendingJoin {
@@ -282,7 +285,12 @@ impl PendingJoin {
         if !state.active_devices().any(|(_, member)| member.record.sync == self.channel.remote) {
             return Err(Error::Peer("the other device is not part of the vault it sent"));
         }
-        write_device_files(home, self.join.device.as_ref(), state.vault, &self.join.fresh)
+        write_device_files(home, self.join.device.as_ref(), state.vault, &self.join.fresh)?;
+        match &self.relay {
+            // The other devices are on another network, and only the relay reaches them.
+            Some(relay) => crate::places::remember(home, &format!("{}{relay}", crate::places::RELAY_PREFIX)),
+            None => Ok(()),
+        }
     }
 }
 

@@ -544,6 +544,13 @@ fn a_device_on_another_network_joins_with_the_code_it_shows() {
     assert_eq!(waiting.join().unwrap(), words, "both screens must show the same words");
     let far = Vault { dir, home, words: adder.words.clone() };
     assert_eq!(value(&mut far.client(), None, "KEY"), "the-secret");
+    // The devices are on networks apart, so only the relay the code came through keeps them current.
+    for (vault, port) in [(&adder, "1"), (&far, "2")] {
+        vault.client().stop().unwrap();
+        vault.start_broker_with_env("LV_DISCOVERY_PORT", Path::new(port));
+    }
+    adder.add_env("AFTER_JOINING", "still in step", None);
+    assert_eq!(arrives(&far, "AFTER_JOINING"), "still in step");
 }
 
 #[test]
