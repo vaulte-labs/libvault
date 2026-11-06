@@ -85,11 +85,11 @@ fn a_name_taken_in_either_space_is_refused_and_nothing_changes() {
     client.add(Some("Agents"), Meta::env("TAKEN"), env("v"), false).unwrap();
     let mut meta = client.item(None, "github.com").unwrap().meta;
     meta.name = "TAKEN".to_owned();
-    assert_eq!(code(client.edit(None, "github.com", meta, None, false)), ErrorCode::Error);
+    assert_eq!(code(client.edit(None, "github.com", meta, None, false)), ErrorCode::Exists);
     assert_eq!(client.item(None, "github.com").unwrap().meta.name, "github.com");
     client.add(None, Meta::env("ELSEWHERE"), env("v"), false).unwrap();
     client.add(Some("Agents"), Meta::env("ELSEWHERE"), env("w"), false).unwrap();
-    assert_eq!(code(client.link(None, "ELSEWHERE", "Agents")), ErrorCode::Error);
+    assert_eq!(code(client.link(None, "ELSEWHERE", "Agents")), ErrorCode::Exists);
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn moving_takes_a_touch_no_agent_can_give_and_a_taken_name_is_refused() {
     let mut client = vault.client();
     client.add(None, Meta::env("KEY"), env("a"), false).unwrap();
     client.add(Some("Work"), Meta::env("KEY"), env("b"), false).unwrap();
-    assert_eq!(code(client.move_item(None, "KEY", "Work")), ErrorCode::Error);
+    assert_eq!(code(client.move_item(None, "KEY", "Work")), ErrorCode::Exists);
     let mut agent = vault.session_client(&vault.session("Personal", "agent"));
     assert_eq!(code(agent.move_item(None, "KEY", "Work")), ErrorCode::Denied);
     client.remove(Some("Work"), "KEY").unwrap();

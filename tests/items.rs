@@ -202,7 +202,7 @@ fn a_name_already_in_use_is_refused_and_nothing_changes() {
     let mut client = vault.client();
     let mut meta = client.item(None, "FIRST").unwrap().meta;
     meta.name = "SECOND".to_owned();
-    assert_eq!(code(client.edit(None, "FIRST", meta, None, false)), ErrorCode::Error);
+    assert_eq!(code(client.edit(None, "FIRST", meta, None, false)), ErrorCode::Exists);
     assert_eq!(client.reveal(None, "FIRST").unwrap(), env("one"));
 }
 

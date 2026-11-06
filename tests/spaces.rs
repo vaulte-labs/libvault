@@ -10,8 +10,8 @@ use support::{Vault, code, env};
 fn a_name_differing_only_by_case_or_spaces_is_the_same_space() {
     let vault = Vault::new();
     assert_eq!(vault.client().create_space(" Work ").unwrap(), "Work");
-    assert_eq!(code(vault.client().create_space("work")), ErrorCode::Error);
-    assert_eq!(code(vault.client().create_space("Work")), ErrorCode::Error);
+    assert_eq!(code(vault.client().create_space("work")), ErrorCode::Exists);
+    assert_eq!(code(vault.client().create_space("Work")), ErrorCode::Exists);
     vault.add_env("KEY", "value", Some("work"));
     assert_eq!(vault.client().items(Some("Work")).unwrap().len(), 1, "a lookup finds it however it is capitalised");
 }
@@ -28,7 +28,7 @@ fn a_renamed_space_keeps_its_items_and_its_grants() {
     assert_eq!(vault.session_client(&token).items(None).unwrap()[0].space, "Clients");
     assert_eq!(code(vault.client().rename_space(FIRST_SPACE, "Mine")), ErrorCode::Error, "everything unnamed goes to Personal");
     vault.space("Other");
-    assert_eq!(code(vault.client().rename_space("Other", "clients")), ErrorCode::Error);
+    assert_eq!(code(vault.client().rename_space("Other", "clients")), ErrorCode::Exists);
 }
 
 #[test]

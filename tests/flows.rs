@@ -292,7 +292,7 @@ fn a_taken_name_needs_replace_and_replacing_can_be_undone() {
     let vault = Vault::new();
     vault.add_env("KEY", "old", None);
     let mut client = vault.client();
-    assert_eq!(code(client.add(None, Meta::env("KEY"), env("new"), false)), ErrorCode::Error);
+    assert_eq!(code(client.add(None, Meta::env("KEY"), env("new"), false)), ErrorCode::Exists);
     assert_eq!(revealed(&mut client, None, "KEY"), "old");
 
     client.add(None, Meta::env("KEY"), env("new"), true).unwrap();

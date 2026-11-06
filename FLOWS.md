@@ -12,11 +12,11 @@ Rules that hold in every flow:
 - **A touch names what it approves.** The system prompt states the action and the target.
 - **Errors say what happened and what to do next**, and never contain a secret.
 - **Agents get `--json` everywhere** and stable exit codes:
-  `0` ok, `1` error, `2` usage, `3` locked, `4` denied, `5` not found, `6` needs a person.
-  An error under `--json` is `{"error", "code", "next"}`, and its code is one of `error`,
-  `usage`, `locked`, `needs_passphrase` (exit `3`: ask for the passphrase and try again),
-  `denied`, `not_found`, `needs_person`, `needs_host` (exit `1`) and `outdated` (exit `1`: the
-  running broker is older than the program, and was not replaced).
+  `0` ok, `1` error, `2` usage, `3` locked, `4` denied, `5` not found, `6` needs a person,
+  `7` already exists. An error under `--json` is `{"error", "code", "next"}`, and its code is one
+  of `error`, `usage`, `locked`, `needs_passphrase` (exit `3`: ask for the passphrase and try
+  again), `denied`, `not_found`, `exists`, `needs_person`, `needs_host` (exit `1`) and `outdated`
+  (exit `1`: the running broker is older than the program, and was not replaced).
 
 ## 1. Onboarding
 
@@ -34,7 +34,7 @@ Rules that hold in every flow:
 | Failure | Result |
 |---|---|
 | No terminal | Exit `6`. Setup needs a person. |
-| A vault already exists | Stops and changes nothing. There is no overwrite path. |
+| A vault already exists | Exit `7`. Stops and changes nothing. There is no overwrite path. |
 | Wrong confirmation word | Ask again. The key is not reshown unless requested. |
 | Touch cancelled, or killed at any step | Nothing was written. Run it again. |
 | No secure hardware | Says so, and offers a passphrase-protected software vault, marked weaker in `vlt status`. |

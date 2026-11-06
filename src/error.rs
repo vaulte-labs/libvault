@@ -14,6 +14,8 @@ pub enum ErrorCode {
     NeedsPassphrase,
     Denied,
     NotFound,
+    /// Something by that name is already there: an item, a space, a file or a vault. Nothing changed.
+    Exists,
     NeedsPerson,
     /// A secret has nowhere it may be sent. Each interface says how to allow one.
     NeedsHost,
@@ -30,6 +32,7 @@ impl ErrorCode {
             Self::Denied => 4,
             Self::NotFound => 5,
             Self::NeedsPerson => 6,
+            Self::Exists => 7,
         }
     }
 }
@@ -108,6 +111,7 @@ impl Error {
             Self::Usage(_) => ErrorCode::Usage,
             Self::Cancelled | Self::NotApproved(_) => ErrorCode::Denied,
             Self::NotFound(_) | Self::NoVault => ErrorCode::NotFound,
+            Self::Exists(_) | Self::VaultExists => ErrorCode::Exists,
             Self::NeedsPerson(_) => ErrorCode::NeedsPerson,
             Self::NoHost(_) => ErrorCode::NeedsHost,
             Self::Broker { code, .. } => *code,

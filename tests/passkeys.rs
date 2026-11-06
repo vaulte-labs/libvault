@@ -64,7 +64,7 @@ fn a_site_naming_its_own_credentials_gets_only_those() {
     assert_eq!(client.passkey_options(SITE, vec![created.credential_id.clone()]).unwrap().len(), 1);
     assert_eq!(client.passkey_options(SITE, vec![vec![0; 32]]).unwrap(), []);
     let again = PasskeyRequest { exclude: vec![created.credential_id], ..request(SITE, "github.com") };
-    assert_eq!(code(client.create_passkey(again)), ErrorCode::Error, "it was made here before");
+    assert_eq!(code(client.create_passkey(again)), ErrorCode::Exists, "it was made here before");
 }
 
 #[test]
@@ -115,3 +115,4 @@ fn a_locked_vault_offers_nothing_and_asks_nobody() {
     assert_eq!(code(client.passkey_options(SITE, Vec::new())), ErrorCode::Locked);
     assert!(!client.status().unwrap().unlocked);
 }
+
