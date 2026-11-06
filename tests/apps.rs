@@ -145,3 +145,27 @@ fn a_shared_folder_too_deep_for_a_socket_says_so() {
     let error = Client::connect_shared(&deep, options(None)).unwrap_err();
     assert!(error.to_string().contains("too long"), "{error}");
 }
+
+#[test]
+fn the_apps_live_codes_are_recorded_once_per_space_each_time_the_vault_unlocks() {
+    let vault = Vault::new();
+    with_a_login(&vault);
+    vault.client().unlock().unwrap();
+    trusting_callers(&vault);
+    let mut app = vault.client();
+    let recorded = |app: &mut Client| app.audit().unwrap().iter().filter(|event| event.action == "codes").count();
+    for _ in 0..2 {
+        app.codes(None).unwrap();
+        app.codes(Some("Personal")).unwrap();
+    }
+    assert_eq!(recorded(&mut app), 2, "every space, and Personal, once each");
+    app.lock().unwrap();
+    app.unlock().unwrap();
+    app.codes(None).unwrap();
+    assert_eq!(recorded(&mut app), 3, "a new unlock is recorded again");
+
+    fs::remove_file(vault.home.join("trust-callers")).unwrap();
+    vault.client().codes(None).unwrap();
+    vault.client().codes(None).unwrap();
+    assert_eq!(recorded(&mut vault.client()), 5, "anyone else is recorded every time");
+}

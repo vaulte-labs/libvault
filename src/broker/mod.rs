@@ -29,6 +29,7 @@ mod signup;
 mod spaces;
 mod sync;
 
+use std::collections::HashSet;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -66,6 +67,8 @@ struct Core {
     runs: Vec<runs::LiveRun>,
     /// How many times this has locked, so an unlock can tell if one landed during its prompt.
     locks: u64,
+    /// What the vault's own app has been shown codes for since this unlocked. See `current_codes`.
+    codes_shown: HashSet<String>,
 }
 
 impl Core {
@@ -73,6 +76,7 @@ impl Core {
         self.locks += 1;
         self.vault.lock();
         self.grants.clear();
+        self.codes_shown.clear();
         self.end_runs(|_| true);
     }
 
@@ -195,6 +199,7 @@ pub fn run(home: &Path) -> Result<()> {
             places: sync::Places::default(),
             runs: Vec::new(),
             locks: 0,
+            codes_shown: HashSet::new(),
         }),
         unlocking: Mutex::new(()),
         home: home.to_path_buf(),
@@ -384,6 +389,7 @@ mod tests {
             places: sync::Places::default(),
             runs: Vec::new(),
             locks: 0,
+            codes_shown: HashSet::new(),
         };
         (dir, core)
     }

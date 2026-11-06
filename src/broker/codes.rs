@@ -25,8 +25,11 @@ impl Broker {
     }
 
     /// Every login's current code at once, in `space` or every space, for a view that shows them
-    /// all live. One record says they were shown, not one per code, or a view refreshing each
-    /// half minute would fill the log.
+    /// all live. One record says they were shown, not one per code. The vault's own app reads them
+    /// again each half minute while its view is open, so for it only the first read of each space
+    /// since the vault unlocked is recorded: Activity then says codes were on screen during that
+    /// unlock, which is true, without a line every 30 seconds. Every other caller is recorded on
+    /// every read.
     pub(super) fn current_codes(&self, caller: &Caller, space: Option<&str>) -> Result<Response> {
         let spaces: Vec<SpaceId> = {
             let core = self.unlocked()?;
@@ -50,7 +53,10 @@ impl Broker {
                 codes.push(SpaceCode { space: space.clone(), name: item.meta.name, code: current });
             }
         }
-        core.vault.record("codes", space.unwrap_or("every space"), caller.name())?;
+        let target = space.unwrap_or("every space");
+        if !matches!(caller, Caller::App) || core.codes_shown.insert(target.to_owned()) {
+            core.vault.record("codes", target, caller.name())?;
+        }
         Ok(Response::Codes { codes })
     }
 }
