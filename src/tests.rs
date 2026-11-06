@@ -169,6 +169,21 @@ fn a_second_setup_cannot_replace_an_existing_vault() {
 }
 
 #[test]
+fn a_setup_that_could_not_finish_finishes_later_with_the_recovery_key_already_written_down() {
+    let dir = tempfile::tempdir().unwrap();
+    let setup = Setup::new(Software::generate(PASSPHRASE, Cost::FAST).unwrap());
+    let words = setup.recovery().words().to_string();
+    let blocked = dir.path().join("a file");
+    fs::write(&blocked, b"").unwrap();
+    assert!(setup.finish(&blocked.join("vault"), "Test Mac").is_err());
+    assert!(!blocked.join("vault").exists());
+
+    let home = dir.path().join("vault");
+    setup.finish(&home, "Test Mac").unwrap();
+    assert!(crate::Recovery::open(&home, &words).is_ok(), "the words shown before the failure open the vault");
+}
+
+#[test]
 fn two_processes_cannot_hold_one_vault() {
     let (dir, vault, _) = new_vault();
     let second = Vault::open(&dir.path().join("vault"), Some(PASSPHRASE));

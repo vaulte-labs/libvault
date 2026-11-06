@@ -96,12 +96,14 @@ impl Setup {
         &self.recovery
     }
 
-    /// Asks the person, then creates the vault in one atomic step. `home` must not hold one.
-    pub fn finish(self, home: &Path, device_name: &str) -> Result<()> {
+    /// Asks the person, then creates the vault in one atomic step. `home` must not hold one. A
+    /// cancelled or failed attempt leaves nothing behind, so the same setup, and the recovery key
+    /// already written down, can finish on the next try.
+    pub fn finish(&self, home: &Path, device_name: &str) -> Result<()> {
         self.create(home, device_name).map(drop)
     }
 
-    pub(crate) fn create(self, home: &Path, device_name: &str) -> Result<Vault> {
+    pub(crate) fn create(&self, home: &Path, device_name: &str) -> Result<Vault> {
         if vault::exists(home) {
             return Err(Error::VaultExists);
         }
@@ -120,7 +122,7 @@ impl Setup {
             let _ = fs::remove_dir_all(&staging);
         }
         result?;
-        Vault::with_device(home, self.device)
+        Vault::with_device(home, Arc::clone(&self.device))
     }
 
     fn build(&self, home: &Path, device_name: &str) -> Result<()> {
