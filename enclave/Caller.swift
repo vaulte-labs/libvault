@@ -5,6 +5,7 @@ import Security
 // kernel's audit token names that exact process, so one that connects and then turns into
 // something else cannot borrow a signature it does not have.
 
+#if os(macOS)
 @_cdecl("lv_peer_is_app")
 public func lvPeerIsApp(_ token: UnsafePointer<UInt8>, _ tokenLength: Int, _ identifiers: UnsafePointer<CChar>) -> Bool {
     guard let team = ownTeam() else { return false }
@@ -26,6 +27,7 @@ public func lvOwnTeam(_ out: UnsafeMutablePointer<UInt8>, _ capacity: Int) -> In
     out.update(from: bytes, count: bytes.count)
     return bytes.count
 }
+#endif
 
 /// Writes the app group's container for `group` into `out`, creating it as the system does, and
 /// returns the path's length, or 0 when this process may not have one.
@@ -38,6 +40,7 @@ public func lvGroupContainer(_ group: UnsafePointer<CChar>, _ out: UnsafeMutable
     return bytes.count
 }
 
+#if os(macOS)
 /// The team that signed this process. An unsigned or ad hoc build has none, so it trusts no one.
 private func ownTeam() -> String? {
     var me: SecCode?
@@ -49,3 +52,4 @@ private func ownTeam() -> String? {
     else { return nil }
     return (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String
 }
+#endif

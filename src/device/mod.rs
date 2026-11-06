@@ -1,6 +1,6 @@
 //! Secure hardware behind one small interface, so the vault never sees private keys.
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 pub mod enclave;
 pub mod server;
 pub mod software;

@@ -1,4 +1,6 @@
+#if os(macOS)
 import CoreGraphics
+#endif
 import CryptoKit
 import Foundation
 import LocalAuthentication
@@ -176,8 +178,10 @@ public func lvEnclaveSign(
     }
 }
 
+#if os(macOS)
 @_cdecl("lv_screen_locked")
 public func lvScreenLocked() -> Bool {
     guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return true }
     return session["CGSSessionScreenIsLocked"] as? Bool ?? false
 }
+#endif

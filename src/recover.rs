@@ -175,7 +175,7 @@ impl Recovery {
 
     /// Finishes on this device's secure hardware, or reports that it has none.
     pub fn finish_with_hardware(self, home: &Path, device_name: &str) -> Result<()> {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         if crate::device::enclave::available() {
             return self.finish(&crate::device::enclave::Enclave::generate()?, home, device_name);
         }

@@ -72,7 +72,7 @@ fn load_device(home: &Path, passphrase: Option<&str>) -> Result<Arc<dyn Device>>
     let stored = fs::read(home.join("local").join(DEVICE_FILE)).map_err(|_| Error::NoVault)?;
     let (kind, rest) = stored.split_first().ok_or(Error::Corrupt("empty device file"))?;
     match *kind {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         ENCLAVE => Ok(Arc::new(crate::device::enclave::Enclave::from_stored(rest)?)),
         SOFTWARE => Ok(Arc::new(Software::from_stored(rest, passphrase)?)),
         SERVER => Ok(Arc::new(crate::device::server::Server::from_stored(rest)?)),
@@ -166,7 +166,7 @@ pub struct Vault {
     pub(crate) settled: Option<crypto::Hash>,
     /// Shared with whoever waits to sync, which a growth wakes.
     pub(crate) growth: Arc<crate::store::Growth>,
-    _lock: File,
+    lock: File,
 }
 
 impl Vault {
@@ -208,7 +208,7 @@ impl Vault {
             diverged: false,
             settled,
             growth: Arc::default(),
-            _lock: lock,
+            lock,
         })
     }
 
@@ -315,6 +315,13 @@ impl Vault {
 
     pub fn lock(&mut self) {
         self.keys = None;
+    }
+
+    /// Lets another process open this home. Nothing here may write after this, because the other
+    /// process may write too: the only way on is to open the vault again.
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub(crate) fn release(&self) {
+        let _ = self.lock.unlock();
     }
 
     /// The newest generation held here that is safe to seal something new under.

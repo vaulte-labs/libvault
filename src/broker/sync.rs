@@ -208,7 +208,7 @@ impl Broker {
     /// Waits for a second device, then listens, announces and stays in step: with everyone at once
     /// when the logs here grow, and on every beat with whoever is due.
     pub(super) fn keep_peers_current(self: Arc<Self>) {
-        while self.core().vault.device_count() < 2 {
+        while self.is_asleep() || self.core().vault.device_count() < 2 {
             std::thread::sleep(Duration::from_millis(250));
         }
         let Ok(listener) = TcpListener::bind(("0.0.0.0", 0)) else { return };
@@ -231,6 +231,10 @@ impl Broker {
         let mut paced = Paced::new(Arc::clone(&self.core().vault.growth));
         let mut beat: Option<Instant> = None;
         loop {
+            if self.is_asleep() {
+                std::thread::sleep(BEACON_EVERY);
+                continue;
+            }
             if beat.is_none_or(|beat| beat.elapsed() >= BEACON_EVERY) {
                 beat = Some(Instant::now());
                 if let Ok(neighbours) = self.neighbours() {
@@ -384,7 +388,9 @@ impl Broker {
     pub(super) fn keep_backups_current(&self) {
         let mut paced = Paced::new(Arc::clone(&self.core().vault.growth));
         loop {
-            self.sync_backups();
+            if !self.is_asleep() {
+                self.sync_backups();
+            }
             paced.grew_within(FOLDER_REFRESH);
         }
     }

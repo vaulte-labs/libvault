@@ -25,9 +25,9 @@ use crate::{Error, Result, space};
 
 /// Whether this device has secure hardware to hold its keys.
 pub fn has_secure_hardware() -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     return crate::device::enclave::available();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(target_vendor = "apple"))]
     false
 }
 
@@ -79,7 +79,7 @@ impl Setup {
 
     /// Uses this device's secure hardware, or reports that it has none.
     pub fn with_hardware() -> Result<Self> {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         if crate::device::enclave::available() {
             return Ok(Self::new(crate::device::enclave::Enclave::generate()?));
         }

@@ -16,6 +16,7 @@ mod fill_requests;
 mod grants;
 mod handlers;
 mod history;
+mod in_process;
 mod linking;
 mod login;
 mod manage;
@@ -35,6 +36,7 @@ use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
@@ -42,6 +44,8 @@ use crate::client::{pid_path, socket_path};
 use crate::device::Device;
 use crate::locking::LockSettings;
 use crate::store::log::now_ms;
+#[cfg(target_os = "ios")]
+pub use in_process::{connect_in_process, sleep_in_process};
 use zeroize::Zeroizing;
 
 #[cfg(feature = "fuzz")]
@@ -124,6 +128,8 @@ pub struct Broker {
     sync_key: Zeroizing<[u8; 32]>,
     sync_port: OnceLock<u16>,
     asks: asks::AskGate,
+    /// The vault is locked and its folder let go, until a client next asks for something.
+    asleep: AtomicBool,
 }
 
 /// What belongs to one client's connection, and ends with it.
@@ -178,9 +184,6 @@ fn signed_by() -> Option<String> {
 
 pub fn run(home: &Path) -> Result<()> {
     crate::sys::harden_process();
-    let vault = Vault::open(home, None)?;
-    clear_stale_runs(home);
-
     let socket = socket_path(home);
     let _ = std::fs::remove_file(&socket);
     // Restored or copied folders can arrive with looser modes than they were made with.
@@ -188,38 +191,7 @@ pub fn run(home: &Path) -> Result<()> {
     let listener = UnixListener::bind(&socket)?;
     std::fs::set_permissions(&socket, Permissions::from_mode(0o600))?;
     std::fs::write(pid_path(home), std::process::id().to_string())?;
-
-    let sync_key = std::fs::read(home.join("local").join(crate::vault::SYNC_KEY_FILE))?;
-    let sync_key: Zeroizing<[u8; 32]> = Zeroizing::new(sync_key.as_slice().try_into().map_err(|_| Error::Corrupt("bad sync key"))?);
-
-    let now = now_ms();
-    let broker = Arc::new(Broker {
-        device: vault.device(),
-        core: Mutex::new(Core {
-            vault,
-            grants: Grants::default(),
-            last_used: now,
-            settings: LockSettings::read(home),
-            places: sync::Places::default(),
-            runs: Vec::new(),
-            locks: 0,
-            codes_shown: HashSet::new(),
-        }),
-        unlocking: Mutex::new(()),
-        home: home.to_path_buf(),
-        runtime: tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?,
-        sync_key,
-        sync_port: OnceLock::new(),
-        asks: asks::AskGate::new(),
-    });
-
-    let watcher = Arc::clone(&broker);
-    std::thread::spawn(move || watcher.watch_for_lock());
-    let syncer = Arc::clone(&broker);
-    std::thread::spawn(move || syncer.keep_backups_current());
-    let peers = Arc::clone(&broker);
-    std::thread::spawn(move || peers.keep_peers_current());
-
+    let broker = open(home)?;
     shared_socket::listen(&broker, home);
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -231,7 +203,49 @@ pub fn run(home: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The broker for `home`, with its background work started.
+fn open(home: &Path) -> Result<Arc<Broker>> {
+    let broker = Arc::new(Broker::new(home)?);
+    let watcher = Arc::clone(&broker);
+    std::thread::spawn(move || watcher.watch_for_lock());
+    let syncer = Arc::clone(&broker);
+    std::thread::spawn(move || syncer.keep_backups_current());
+    let peers = Arc::clone(&broker);
+    std::thread::spawn(move || peers.keep_peers_current());
+    Ok(broker)
+}
+
 impl Broker {
+    fn new(home: &Path) -> Result<Self> {
+        let vault = Vault::open(home, None)?;
+        clear_stale_runs(home);
+
+        let sync_key = std::fs::read(home.join("local").join(crate::vault::SYNC_KEY_FILE))?;
+        let sync_key: Zeroizing<[u8; 32]> = Zeroizing::new(sync_key.as_slice().try_into().map_err(|_| Error::Corrupt("bad sync key"))?);
+
+        let now = now_ms();
+        Ok(Self {
+            device: vault.device(),
+            core: Mutex::new(Core {
+                vault,
+                grants: Grants::default(),
+                last_used: now,
+                settings: LockSettings::read(home),
+                places: sync::Places::default(),
+                runs: Vec::new(),
+                locks: 0,
+                codes_shown: HashSet::new(),
+            }),
+            unlocking: Mutex::new(()),
+            home: home.to_path_buf(),
+            runtime: tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?,
+            sync_key,
+            sync_port: OnceLock::new(),
+            asks: asks::AskGate::new(),
+            asleep: AtomicBool::new(false),
+        })
+    }
+
     fn core(&self) -> MutexGuard<'_, Core> {
         guard(&self.core)
     }
@@ -276,7 +290,7 @@ impl Broker {
 
     /// Lets end-to-end tests stand in for a person who refuses or is slow to answer.
     fn before_prompt(&self) -> Result<()> {
-        self.before_prompt_unless(&std::sync::atomic::AtomicBool::new(false))
+        self.before_prompt_unless(&AtomicBool::new(false))
     }
 
     fn serve(&self, mut stream: UnixStream) -> Result<()> {
@@ -300,7 +314,10 @@ impl Broker {
                 Err(error) => return Err(Error::Io(error)),
             };
             let stop = matches!(envelope.request, Request::Stop);
-            let response = self.handle(envelope, &mut connection);
+            let response = match self.wake() {
+                Ok(()) => self.handle(envelope, &mut connection),
+                Err(error) => handlers::failure(&error),
+            };
             let exiting = (stop && matches!(response, Response::Ok)) || matches!(response, Response::Wiped);
             if exiting {
                 // Off the path before the reply, so nothing that hears it can still connect: the
@@ -309,7 +326,8 @@ impl Broker {
             }
             write_frame(&mut stream, &response)?;
             if exiting {
-                std::process::exit(0);
+                self.exit();
+                return Ok(());
             }
         }
     }
@@ -333,13 +351,18 @@ impl Broker {
     fn watch_for_lock(&self) {
         loop {
             std::thread::sleep(Duration::from_secs(2));
+            if self.is_asleep() {
+                continue;
+            }
             let screen_locked = self.screen_is_locked();
             let mut core = self.core();
             // Nobody can reach a broker whose socket has gone, as when its vault was deleted, so it
             // ends, and the keys it held go with it instead of staying in memory for good.
-            if !socket_path(&self.home).exists() {
+            if cfg!(not(target_os = "ios")) && !socket_path(&self.home).exists() {
                 core.lock();
-                std::process::exit(0);
+                drop(core);
+                self.exit();
+                return;
             }
             core.check_runs();
             // A server opens again by itself, so locking it would only end its agents' grants.
@@ -359,8 +382,14 @@ fn own_app(stream: &UnixStream) -> bool {
     crate::sys::peer_audit_token(stream).is_some_and(|token| crate::device::enclave::peer_is_app(&token, OWN_APPS))
 }
 
+/// Nothing outside this process can reach a broker it holds.
+#[cfg(target_os = "ios")]
+fn own_app(_stream: &UnixStream) -> bool {
+    true
+}
+
 /// No signature to check, so no caller is trusted beyond its user.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
 fn own_app(_stream: &UnixStream) -> bool {
     false
 }

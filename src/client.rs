@@ -70,13 +70,17 @@ pub struct Client {
 pub type AskPassphrase = fn(reason: &str) -> Result<Zeroizing<String>>;
 
 impl Client {
-    /// Connects to the vault at `home`, starting or replacing the broker if needed.
+    /// Connects to the vault at `home`, starting or replacing the broker if needed. On iOS the
+    /// broker runs in this process.
+    #[cfg_attr(target_os = "ios", allow(unreachable_code, unused_variables))]
     pub fn connect(home: &Path, options: Connect<'_>) -> Result<Self> {
         if !crate::exists(home) {
             return Err(Error::NoVault);
         }
         let session = options.session.map(str::to_owned);
         let passphrase = options.passphrase.map(|passphrase| Zeroizing::new(passphrase.to_owned()));
+        #[cfg(target_os = "ios")]
+        return Ok(Self { stream: crate::broker::connect_in_process(home)?, session, passphrase, upgrade: None, ask_passphrase: None });
         let socket = socket_path(home);
         let daemon = options.daemon.map(Path::to_path_buf).or_else(find_daemon);
         if let Ok(stream) = UnixStream::connect(&socket) {

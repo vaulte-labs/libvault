@@ -17,7 +17,7 @@ use crate::{Error, ErrorCode, Result, Vault};
 
 pub(super) const MAX_GRANT_SECONDS: u64 = crate::MAX_GRANT.as_secs();
 
-fn failure(error: &Error) -> Response {
+pub(super) fn failure(error: &Error) -> Response {
     Response::Error { code: error.code(), message: error.to_string() }
 }
 

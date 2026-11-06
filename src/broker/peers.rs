@@ -106,9 +106,10 @@ impl Broker {
         Ok((channel, peer))
     }
 
-    /// Lets end-to-end tests stand in for a device that is out of reach.
+    /// Asleep, the vault here may be written by another process, so it reaches nobody. End-to-end
+    /// tests also stand in for a device that is out of reach.
     fn out_of_reach(&self) -> bool {
-        cfg!(feature = "test-hooks") && self.home.join("offline").exists()
+        self.is_asleep() || (cfg!(feature = "test-hooks") && self.home.join("offline").exists())
     }
 
     pub(super) fn sync_with(&self, route: &Route, accept: Option<&RecoveryKey>) -> Result<(DeviceId, usize)> {
@@ -259,6 +260,9 @@ impl Broker {
     }
 
     pub(super) fn serve_in_a_slot(self: &Arc<Self>, stream: TcpStream, slots: &Arc<AtomicUsize>) {
+        if self.is_asleep() {
+            return;
+        }
         let Some(slot) = Slot::take(slots) else { return };
         let serving = Arc::clone(self);
         std::thread::spawn(move || {

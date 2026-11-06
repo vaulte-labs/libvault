@@ -22,10 +22,14 @@ const CANCELLED: i32 = 2;
 const TIMED_OUT: i32 = 4;
 
 unsafe extern "C" {
+    #[cfg(target_os = "macos")]
     fn lv_peer_is_app(token: *const u8, length: usize, identifiers: *const std::ffi::c_char) -> bool;
+    #[cfg(target_os = "macos")]
     fn lv_own_team(out: *mut u8, capacity: usize) -> usize;
+    #[cfg(target_os = "macos")]
     fn lv_group_container(group: *const std::ffi::c_char, out: *mut u8, capacity: usize) -> usize;
     fn lv_enclave_available() -> bool;
+    #[cfg(target_os = "macos")]
     fn lv_screen_locked() -> bool;
     fn lv_enclave_generate(out: *mut u8, capacity: usize, written: *mut usize) -> i32;
     fn lv_enclave_authenticate(
@@ -81,12 +85,13 @@ fn check(status: i32) -> Result<()> {
     }
 }
 
-/// True on a Mac with a Secure Enclave.
+/// True on a Mac or iPhone with a Secure Enclave.
 pub fn available() -> bool {
     // SAFETY: takes no arguments and has no preconditions.
     unsafe { lv_enclave_available() }
 }
 
+#[cfg(target_os = "macos")]
 /// Whether the process behind `token` is signed as one of `identifiers` by the team that signed
 /// this one, and is unchanged since.
 pub fn peer_is_app(token: &[u8; 32], identifiers: &std::ffi::CStr) -> bool {
@@ -94,6 +99,7 @@ pub fn peer_is_app(token: &[u8; 32], identifiers: &std::ffi::CStr) -> bool {
     unsafe { lv_peer_is_app(token.as_ptr(), token.len(), identifiers.as_ptr()) }
 }
 
+#[cfg(target_os = "macos")]
 /// The team that signed this process, if any.
 pub fn own_team() -> Option<String> {
     let mut team = [0u8; 64];
@@ -102,6 +108,7 @@ pub fn own_team() -> Option<String> {
     String::from_utf8(team.get(..length)?.to_vec()).ok().filter(|team| !team.is_empty())
 }
 
+#[cfg(target_os = "macos")]
 /// The app group's container for `group`, created the way the system expects, when this process
 /// is entitled to it.
 pub fn group_container(group: &str) -> Option<std::path::PathBuf> {
@@ -114,10 +121,14 @@ pub fn group_container(group: &str) -> Option<std::path::PathBuf> {
     Some(path.into())
 }
 
-/// True while the login screen is up, or when no GUI session exists.
+/// True while the login screen is up, or when no GUI session exists. An iPhone app runs only while
+/// its phone is unlocked.
 pub fn screen_locked() -> bool {
     // SAFETY: takes no arguments and has no preconditions.
-    unsafe { lv_screen_locked() }
+    #[cfg(target_os = "macos")]
+    return unsafe { lv_screen_locked() };
+    #[cfg(not(target_os = "macos"))]
+    false
 }
 
 #[derive(Debug)]

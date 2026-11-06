@@ -143,7 +143,7 @@ pub struct Join {
 impl Join {
     /// Starts joining with this device's secure hardware, or reports that it has none.
     pub fn with_hardware(name: &str) -> Result<Self> {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         if crate::device::enclave::available() {
             return Self::start(Arc::new(crate::device::enclave::Enclave::generate()?), name);
         }

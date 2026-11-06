@@ -241,6 +241,10 @@ impl Broker {
     /// they are what a device sent in an exchange, begun with the logs here grown to that count.
     pub(super) fn take_in(&self, logs: Logs, accept: Option<&RecoveryKey>, from: Option<(DeviceId, u64)>) -> Result<usize> {
         let mut core = self.core();
+        // A sync that began before the broker slept must not write to a vault it let go of.
+        if self.is_asleep() {
+            return Err(Error::Busy);
+        }
         let unchanged = from.is_some_and(|(_, began)| core.vault.growth.count() == began);
         let merged = core.vault.merge_logs(logs, accept)?;
         if let Some((device, began)) = from {
