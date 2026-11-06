@@ -116,3 +116,21 @@ fn a_locked_vault_offers_nothing_and_asks_nobody() {
     assert!(!client.status().unwrap().unlocked);
 }
 
+#[test]
+fn a_locked_vault_says_which_of_a_sites_credential_ids_are_its_own_and_nothing_else() {
+    let vault = Vault::new();
+    let (mut client, created) = made(&vault);
+    let ids = vec![created.credential_id.clone(), vec![7; 32]];
+    assert_eq!(client.passkeys_held(SITE, ids.clone()).unwrap(), [true, false]);
+    let mut agent = vault.session_client(&vault.session("Personal", "agent"));
+    assert_eq!(code(agent.passkeys_held(SITE, ids.clone())), ErrorCode::Denied, "only a person's browser asks");
+    client.lock().unwrap();
+    vault.deny_touches();
+
+    let mut locked = vault.client();
+    assert_eq!(locked.passkeys_held(SITE, ids.clone()).unwrap(), [true, false], "answered without unlocking");
+    assert_eq!(locked.passkeys_held("https://gist.github.com", ids.clone()).unwrap(), [true, false], "a page under its site");
+    assert_eq!(locked.passkeys_held("https://evil.example", ids.clone()).unwrap(), [false, false], "another site learns nothing");
+    assert_eq!(locked.passkeys_held("http://github.com", ids).unwrap(), [false, false], "nor a page over plain HTTP");
+    assert!(!locked.status().unwrap().unlocked);
+}

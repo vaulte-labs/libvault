@@ -19,6 +19,7 @@ mod history;
 mod linking;
 mod login;
 mod manage;
+mod passkey_ids;
 mod passkeys;
 mod peers;
 mod policy;
@@ -74,6 +75,9 @@ struct Core {
 impl Core {
     fn lock(&mut self) {
         self.locks += 1;
+        if self.vault.is_unlocked() {
+            passkey_ids::remember(&self.vault);
+        }
         self.vault.lock();
         self.grants.clear();
         self.codes_shown.clear();

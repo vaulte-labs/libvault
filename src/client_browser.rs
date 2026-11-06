@@ -79,6 +79,16 @@ impl Client {
         }
     }
 
+    /// Which of `ids`, credential ids a site named, are this vault's passkeys for `origin`, as one
+    /// yes or no each. Answered while the vault is locked too, never with a prompt, and never to a
+    /// session.
+    pub fn passkeys_held(&mut self, origin: &str, ids: Vec<Vec<u8>>) -> Result<Vec<bool>> {
+        match self.call(Request::PasskeysHeld { origin: origin.to_owned(), ids })? {
+            Response::PasskeysHeld { held } => Ok(held),
+            _ => Err(UNEXPECTED),
+        }
+    }
+
     /// Makes and saves a passkey for the site that asks, after a touch naming the site.
     pub fn create_passkey(&mut self, request: PasskeyRequest) -> Result<NewPasskey> {
         match self.call(Request::CreatePasskey(request))? {

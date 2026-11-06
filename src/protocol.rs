@@ -288,6 +288,11 @@ pub enum Request {
         origin: String,
         allow: Vec<Vec<u8>>,
     },
+    /// Which of the credential ids a site named are this vault's passkeys for it, while locked too.
+    PasskeysHeld {
+        origin: String,
+        ids: Vec<Vec<u8>>,
+    },
     CreatePasskey(PasskeyRequest),
     SignPasskey {
         space: String,
@@ -365,6 +370,7 @@ pub enum Response {
     FillOptions { options: Vec<FillOption> },
     AutofillIdentities { identities: Vec<AutofillIdentity> },
     PasskeyOptions { options: Vec<PasskeyOption> },
+    PasskeysHeld { held: Vec<bool> },
     NewPasskey(NewPasskey),
     PasskeyAssertion(PasskeyAssertion),
     LockSettings(crate::LockSettings),

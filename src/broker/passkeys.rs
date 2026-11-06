@@ -13,12 +13,12 @@ use crate::protocol::{PasskeyOption, PasskeyRequest, Response};
 use crate::vault::Vault;
 use crate::{Error, Result};
 
-fn page(origin: &str) -> Result<Origin> {
+pub(super) fn page(origin: &str) -> Result<Origin> {
     Origin::parse(origin).ok_or(Error::Invalid("that page has no origin"))
 }
 
 /// Every passkey in the vault, with the space it is in, its listing and its secret.
-fn passkeys(vault: &Vault) -> Result<Vec<(String, SpaceId, Meta, Secret)>> {
+pub(super) fn passkeys(vault: &Vault) -> Result<Vec<(String, SpaceId, Meta, Secret)>> {
     let mut found = Vec::new();
     for space in vault.spaces()? {
         for item in vault.items(&space.id)?.into_iter().filter(|item| item.meta.kind == Kind::Passkey) {
@@ -73,6 +73,7 @@ impl Broker {
         item::validate(&meta)?;
         core.vault.add(&id, meta, &secret)?;
         core.vault.record("passkey", &name, caller.name())?;
+        super::passkey_ids::remember(&core.vault);
         created.name = name;
         Ok(Response::NewPasskey(created))
     }
