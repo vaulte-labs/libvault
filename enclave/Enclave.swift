@@ -32,7 +32,12 @@ private func data(_ pointer: UnsafePointer<UInt8>, _ length: Int) -> Data {
 
 @_cdecl("lv_enclave_available")
 public func lvEnclaveAvailable() -> Bool {
+    // The iOS simulator makes enclave keys, but none gated by a person, which every key here is.
+    #if targetEnvironment(simulator)
+    false
+    #else
     SecureEnclave.isAvailable
+    #endif
 }
 
 /// Writes eight length-prefixed fields: a blob and a public key for each of the
