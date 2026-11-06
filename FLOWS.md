@@ -158,7 +158,7 @@ or removing devices, so a laptop and a server need only the laptop.
 | Step | What happens |
 |---|---|
 | 1 | New device creates its enclave keys and listens. |
-| 2 | Existing device finds it on the network. Off-network, a one-time code is pasted across. |
+| 2 | Existing device finds it on the network. Off-network, it connects to the address the new device shows, so that port must be open to it: the relay does not carry a pairing. |
 | 3 | Both show the same three words. |
 | 4 | Person compares and confirms on both, with a touch on each. |
 | 5 | With two or more enrolled devices, another device must also approve. |
@@ -452,7 +452,7 @@ relay someone runs themselves: `vlt device connect relay:HOST:PORT` on each devi
 | Step | What happens |
 |---|---|
 | 1 | Each device waits at the relay under tags only its peers can compute. |
-| 2 | A device not heard from in 30 seconds is called there, and one whose logs grow calls at once, so a change also travels on through a device that did not make it. They sync as on a local network. `a_change_reaches_a_device_through_a_relay_moments_after_it_is_made`, `a_change_travels_on_through_a_device_that_did_not_make_it` |
+| 2 | A device whose logs grow calls the others at once, so a change also travels on through a device that did not make it. Otherwise a device is called only when it may lack something, or after 15 minutes unheard, so idle devices cost the relay nothing. A failed call is tried again after 10 seconds, then twice as long each time, and a device coming back to the relay calls everyone. They sync as on a local network. `a_change_reaches_a_device_through_a_relay_moments_after_it_is_made`, `a_change_travels_on_through_a_device_that_did_not_make_it` |
 | 3 | Approvals reach a device the same way. |
 
 | Failure | Result |
