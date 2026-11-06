@@ -25,8 +25,6 @@ use crate::{Error, Result, crypto};
 /// The account service Vaulte runs, and the root key that vouches for its passes.
 const HOSTED_ISSUER: &str = "https://vaulte-accounts.caeser.workers.dev";
 const HOSTED_ROOT: &str = "7b05bb2bb80b90172d4d39ddc9904c438b0a32ab16e02958280c0aeb1c080a30";
-/// The relay Vaulte hosts, which every device with an account from Vaulte's service syncs through.
-const HOSTED_RELAY: &str = "relay:vaulte-relay.fly.dev:443";
 
 const ACCOUNT_FILE: &str = "relay-account.json";
 const PASS_FILE: &str = "relay-pass";
@@ -72,7 +70,7 @@ impl Broker {
     /// Syncs through Vaulte's relay once the account is from Vaulte's service, so every app that
     /// subscribes gets the relay it paid for without having to know where it is.
     fn use_hosted_relay(&self, account: &Account) -> Result<()> {
-        if account.issuer == HOSTED_ISSUER { self.add_place(HOSTED_RELAY) } else { Ok(()) }
+        if account.issuer == HOSTED_ISSUER { self.add_place(&format!("relay:{}", crate::net::relay::HOSTED)) } else { Ok(()) }
     }
 
     /// Where to pay, with an account made first if this device has none. The number is the

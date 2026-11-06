@@ -8,14 +8,15 @@
 use std::fs;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use bip39::Language;
 
 use super::channel::{Channel, IO_TIMEOUT, MAX_LOGS};
 use super::discovery::{self, Beacon};
+use super::join_code;
 use crate::crypto::{self, Hash};
 use crate::device::Device;
 use crate::device::software::{Cost, Software};
@@ -71,8 +72,17 @@ fn words_as_joiner(channel: &mut Channel, committed: &Hash) -> Result<[String; 3
     Ok(comparison_words(&channel.hash, &revealed, &mine))
 }
 
-/// Connects to a joining device, at an address or by waiting to hear one on the network.
-pub(crate) fn connect_to_joiner(address: Option<&str>, key: &[u8; 32], timeout: Duration) -> Result<Channel> {
+/// Connects to a joining device: at an address, through `relays` by the code it shows, or by
+/// waiting to hear one on the network.
+pub(crate) fn connect_to_joiner(address: Option<&str>, key: &[u8; 32], timeout: Duration, relays: &[String], pass: &[u8]) -> Result<Channel> {
+    if let Some(digits) = address.and_then(join_code::parse) {
+        for relay in relays {
+            if let Ok(channel) = join_code::dial(relay, &digits, pass).and_then(|stream| Channel::initiate(stream, key, PROLOGUE, None)) {
+                return Ok(channel);
+            }
+        }
+        return Err(Error::Peer("no device is waiting with that code. Check it, and that the other device is still joining"));
+    }
     if let Some(address) = address {
         return Channel::initiate(TcpStream::connect(address)?, key, PROLOGUE, None);
     }
@@ -125,6 +135,8 @@ pub struct Join {
     fresh: NewDevice,
     name: String,
     listener: TcpListener,
+    /// Devices that reached this one through a relay, by its code.
+    relayed: Option<mpsc::Receiver<TcpStream>>,
     stop: Arc<AtomicBool>,
 }
 
@@ -164,12 +176,20 @@ impl Join {
                 std::thread::sleep(ANNOUNCE_EVERY);
             }
         });
-        Ok(Self { device, fresh, name: name.to_owned(), listener, stop })
+        Ok(Self { device, fresh, name: name.to_owned(), listener, relayed: None, stop })
     }
 
     /// The port to give the other device when it cannot find this one on its own.
     pub fn port(&self) -> Result<u16> {
         Ok(self.listener.local_addr()?.port())
+    }
+
+    /// Waits at `relay` too, for a device on another network, and returns the code to type there
+    /// in place of an address.
+    pub fn wait_at_relay(&mut self, relay: &str) -> Result<String> {
+        let digits = join_code::new_code();
+        self.relayed = Some(join_code::wait(relay, &digits, Arc::clone(&self.stop))?);
+        Ok(join_code::shown(&digits))
     }
 
     /// Waits for an enrolled device to connect, then works out the words to compare. A stranger
@@ -185,8 +205,11 @@ impl Join {
             let stream = match self.listener.accept() {
                 Ok((stream, _)) => stream,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(20));
-                    continue;
+                    let Some(stream) = self.relayed.as_ref().and_then(|relayed| relayed.try_recv().ok()) else {
+                        std::thread::sleep(Duration::from_millis(20));
+                        continue;
+                    };
+                    stream
                 }
                 Err(error) => return Err(error.into()),
             };

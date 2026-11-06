@@ -520,6 +520,41 @@ fn a_change_reaches_a_device_through_a_relay_moments_after_it_is_made() {
     arrives_unasked(&second, "FROM_THE_MAC", Duration::from_secs(5));
 }
 
+#[test]
+fn a_device_on_another_network_joins_with_the_code_it_shows() {
+    let relay = relay();
+    let adder = Vault::new();
+    adder.add_env("KEY", "the-secret", None);
+    adder.client().add_peer(&format!("relay:{relay}")).unwrap();
+    let mut join = Join::with_passphrase(PASSPHRASE, Cost::FAST, "Far Away").unwrap();
+    let code = join.wait_at_relay(&relay).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("vault");
+    let joined = home.clone();
+    let waiting = std::thread::spawn(move || {
+        let pending = join.wait(Duration::from_secs(10)).unwrap();
+        let words = pending.words().clone();
+        pending.confirm(&joined).unwrap();
+        words
+    });
+    // In place of an address, as a person types it.
+    let mut client = adder.client();
+    let words = client.begin_pairing(Some(&code.replace('-', " "))).unwrap();
+    client.confirm_pairing_holding(None, None).unwrap();
+    assert_eq!(waiting.join().unwrap(), words, "both screens must show the same words");
+    let far = Vault { dir, home, words: adder.words.clone() };
+    assert_eq!(value(&mut far.client(), None, "KEY"), "the-secret");
+}
+
+#[test]
+fn a_code_nobody_is_waiting_with_says_so() {
+    let relay = relay();
+    let adder = Vault::new();
+    adder.client().add_peer(&format!("relay:{relay}")).unwrap();
+    let error = adder.client().begin_pairing(Some("1111-2222-3333")).unwrap_err();
+    assert!(error.to_string().contains("no device is waiting with that code"), "{error}");
+}
+
 /// Three devices in a line: the first and the middle meet at one relay, the middle and the last at
 /// another, and no beacon reaches any of them. The first and the last never meet.
 fn in_a_line() -> (Vault, Vault, Vault) {
@@ -850,6 +885,28 @@ fn a_paid_account_s_devices_meet_at_a_relay_that_asks_for_passes() {
     let (first, second) = apart_at_a_paid_relay(&issuer, "1234 5678 9012 3456");
     second.add_env("THROUGH_A_PAID_RELAY", "yes", None);
     assert_eq!(arrives(&first, "THROUGH_A_PAID_RELAY"), "yes");
+}
+
+#[test]
+fn a_device_joins_through_a_relay_that_asks_for_passes_with_only_the_adder_paid() {
+    let issuer = issuer::Issuer::start();
+    issuer.pay("1234 5678 9012 3456");
+    let relay = start_relay(Some(&issuer.issuer().root));
+    let adder = Vault::new();
+    adder.add_env("KEY", "the-secret", None);
+    adder.client().use_relay_account("1234 5678 9012 3456", Some(issuer.issuer())).unwrap();
+    adder.client().add_peer(&format!("relay:{relay}")).unwrap();
+    let mut join = Join::with_passphrase(PASSPHRASE, Cost::FAST, "Far Away").unwrap();
+    let code = join.wait_at_relay(&relay).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("vault");
+    let joined = home.clone();
+    let waiting = std::thread::spawn(move || join.wait(Duration::from_secs(10)).unwrap().confirm(&joined).unwrap());
+    let mut client = adder.client();
+    client.begin_pairing(Some(&code)).unwrap();
+    client.confirm_pairing_holding(None, None).unwrap();
+    waiting.join().unwrap();
+    assert_eq!(value(&mut Vault { dir, home, words: adder.words.clone() }.client(), None, "KEY"), "the-secret");
 }
 
 #[test]

@@ -4,5 +4,6 @@
 
 pub(crate) mod channel;
 pub(crate) mod discovery;
+pub(crate) mod join_code;
 pub(crate) mod pair;
 pub mod relay;

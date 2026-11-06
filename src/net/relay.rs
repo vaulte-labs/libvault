@@ -14,6 +14,9 @@ use std::time::Duration;
 
 use crate::{Error, Result};
 
+/// The relay Vaulte hosts.
+pub const HOSTED: &str = "vaulte-relay.fly.dev:443";
+
 pub(crate) const TAG_LEN: usize = 32;
 pub(crate) type Tag = [u8; TAG_LEN];
 type Id = [u8; 16];

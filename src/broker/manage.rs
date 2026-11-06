@@ -176,7 +176,12 @@ impl Broker {
 
     pub(super) fn begin_pairing(&self, caller: &Caller, address: Option<&str>, connection: &mut Connection) -> Result<Response> {
         self.check(caller, Action::BeginPairing)?;
-        let mut channel = pair::connect_to_joiner(address, &self.sync_key, pair::PERSON_TIMEOUT)?;
+        // A code reaches a device on another network through this device's relays, else Vaulte's.
+        let mut relays = self.relays();
+        if !relays.iter().any(|relay| relay == crate::net::relay::HOSTED) {
+            relays.push(crate::net::relay::HOSTED.to_owned());
+        }
+        let mut channel = pair::connect_to_joiner(address, &self.sync_key, pair::PERSON_TIMEOUT, &relays, &self.relay_pass())?;
         let words = pair::words_as_adder(&mut channel)?;
         connection.pairing = Some((channel, words.clone()));
         Ok(Response::Pairing { words })
