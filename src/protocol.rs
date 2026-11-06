@@ -189,10 +189,6 @@ pub enum Request {
     Codes {
         space: Option<String>,
     },
-    RemoveCode {
-        space: Option<String>,
-        name: String,
-    },
     Expiring,
     Icon {
         space: Option<String>,
@@ -208,6 +204,9 @@ pub enum Request {
         name: String,
         meta: Meta,
         secret: Option<Secret>,
+        /// Takes a login's two-factor code off in the same change.
+        #[serde(default)]
+        remove_code: bool,
     },
     Link {
         space: Option<String>,

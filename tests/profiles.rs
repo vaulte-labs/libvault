@@ -76,8 +76,8 @@ fn an_edited_card_has_its_number_checked_and_its_hint_rebuilt() {
     client.add(None, meta.clone(), secret, false).unwrap();
     let new_card = |number: &str| Secret::Card { number: number.into(), expiry: "12/30".into(), cvc: "123".into(), holder: "Jane Doe".into() };
 
-    client.edit(None, "Card", meta.clone(), Some(new_card("5555555555554444"))).unwrap();
+    client.edit(None, "Card", meta.clone(), Some(new_card("5555555555554444")), false).unwrap();
     assert_eq!(client.item(None, "Card").unwrap().meta.hint.as_deref(), Some("Mastercard 4444"));
-    assert_eq!(code(client.edit(None, "Card", meta, Some(new_card("4242424242424241")))), ErrorCode::Error);
+    assert_eq!(code(client.edit(None, "Card", meta, Some(new_card("4242424242424241")), false)), ErrorCode::Error);
     assert_eq!(client.item(None, "Card").unwrap().meta.hint.as_deref(), Some("Mastercard 4444"));
 }

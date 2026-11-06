@@ -50,7 +50,7 @@ fn history_names_each_version_what_it_changed_and_which_is_current() {
     let vault = Vault::new();
     vault.add_env("KEY", "one", None);
     vault.client().add(None, Meta::env("KEY"), env("two"), true).unwrap();
-    vault.client().edit(None, "KEY", Meta::env("RENAMED"), None).unwrap();
+    vault.client().edit(None, "KEY", Meta::env("RENAMED"), None, false).unwrap();
     let versions = vault.client().history(None, "RENAMED").unwrap();
     let changed: Vec<Vec<String>> = versions.iter().map(|version| version.changed.clone()).collect();
     assert_eq!(changed, [vec![], vec!["secret".to_owned()], vec!["name".to_owned()]]);

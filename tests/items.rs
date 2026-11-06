@@ -117,7 +117,7 @@ fn renaming_keeps_the_secret_and_the_history() {
     let mut client = vault.client();
     let mut meta = client.item(None, "github.com").unwrap().meta;
     meta.name = "GitHub".to_owned();
-    client.edit(None, "github.com", meta, None).unwrap();
+    client.edit(None, "github.com", meta, None, false).unwrap();
 
     assert_eq!(code(client.item(None, "github.com")), ErrorCode::NotFound);
     assert_eq!(client.reveal(None, "GitHub").unwrap(), login("password", None));
@@ -134,7 +134,7 @@ fn websites_can_be_added_without_touching_the_password() {
     let mut meta = client.item(None, "github.com").unwrap().meta;
     meta.urls.push("https://gist.github.com".to_owned());
     meta.username = Some("me".to_owned());
-    client.edit(None, "github.com", meta, None).unwrap();
+    client.edit(None, "github.com", meta, None, false).unwrap();
     let item = client.item(None, "github.com").unwrap();
     assert_eq!(item.meta.urls.len(), 2);
     assert_eq!(item.meta.username.as_deref(), Some("me"));
@@ -147,7 +147,7 @@ fn a_new_secret_replaces_the_old_and_undo_brings_it_back() {
     vault.add_env("KEY", "first", None);
     let mut client = vault.client();
     let meta = client.item(None, "KEY").unwrap().meta;
-    client.edit(None, "KEY", meta, Some(env("second"))).unwrap();
+    client.edit(None, "KEY", meta, Some(env("second")), false).unwrap();
     assert_eq!(client.reveal(None, "KEY").unwrap(), env("second"));
     client.undo().unwrap();
     assert_eq!(client.reveal(None, "KEY").unwrap(), env("first"));
@@ -168,21 +168,30 @@ fn a_new_password_keeps_two_factor_with_no_setup_key_sent() {
     with_two_factor(&vault);
     let mut client = vault.client();
     let meta = client.item(None, "github.com").unwrap().meta;
-    client.edit(None, "github.com", meta, Some(login("changed", None))).unwrap();
+    client.edit(None, "github.com", meta, Some(login("changed", None)), false).unwrap();
     assert_eq!(client.reveal(None, "github.com").unwrap(), login("changed", None));
     assert!(client.item(None, "github.com").unwrap().meta.two_factor);
     assert!(client.code(None, "github.com").is_ok());
 }
 
 #[test]
-fn removing_two_factor_is_asked_for_by_name() {
+fn removing_two_factor_is_part_of_one_edit_that_one_undo_reverses() {
     let vault = Vault::new();
     with_two_factor(&vault);
     let mut client = vault.client();
-    client.remove_code(None, "github.com").unwrap();
-    assert!(!client.item(None, "github.com").unwrap().meta.two_factor);
+    let mut meta = client.item(None, "github.com").unwrap().meta;
+    meta.username = Some("renamed".to_owned());
+    client.edit(None, "github.com", meta.clone(), None, true).unwrap();
+    let item = client.item(None, "github.com").unwrap();
+    assert!(!item.meta.two_factor);
+    assert_eq!(item.meta.username.as_deref(), Some("renamed"));
     assert_eq!(client.reveal(None, "github.com").unwrap(), login("password", None));
-    assert_eq!(code(client.remove_code(None, "github.com")), ErrorCode::NotFound);
+    assert_eq!(code(client.edit(None, "github.com", meta, None, true)), ErrorCode::NotFound, "there is no code left to take off");
+
+    client.undo().unwrap();
+    let item = client.item(None, "github.com").unwrap();
+    assert!(item.meta.two_factor, "one undo brings the code back");
+    assert_eq!(item.meta.username, None, "and the rest of the save with it");
 }
 
 #[test]
@@ -193,7 +202,7 @@ fn a_name_already_in_use_is_refused_and_nothing_changes() {
     let mut client = vault.client();
     let mut meta = client.item(None, "FIRST").unwrap().meta;
     meta.name = "SECOND".to_owned();
-    assert_eq!(code(client.edit(None, "FIRST", meta, None)), ErrorCode::Error);
+    assert_eq!(code(client.edit(None, "FIRST", meta, None, false)), ErrorCode::Error);
     assert_eq!(client.reveal(None, "FIRST").unwrap(), env("one"));
 }
 
@@ -202,7 +211,7 @@ fn an_item_cannot_change_kind() {
     let vault = Vault::new();
     vault.add_env("KEY", "value", None);
     let meta = Meta::new(Kind::Note, "KEY");
-    assert_eq!(code(vault.client().edit(None, "KEY", meta, None)), ErrorCode::Error);
+    assert_eq!(code(vault.client().edit(None, "KEY", meta, None, false)), ErrorCode::Error);
 }
 
 #[test]
@@ -213,7 +222,7 @@ fn an_edit_takes_a_touch() {
     let mut meta = client.item(None, "KEY").unwrap().meta;
     meta.name = "RENAMED".to_owned();
     let allow = refuse_touches(&vault);
-    assert_eq!(code(client.edit(None, "KEY", meta, None)), ErrorCode::Denied);
+    assert_eq!(code(client.edit(None, "KEY", meta, None, false)), ErrorCode::Denied);
     allow();
     assert!(client.item(None, "KEY").is_ok());
 }
@@ -227,7 +236,7 @@ fn a_session_needs_the_same_touch_to_edit() {
     let mut meta = session.item(None, "KEY").unwrap().meta;
     meta.name = "RENAMED".to_owned();
     let allow = refuse_touches(&vault);
-    assert_eq!(code(session.edit(None, "KEY", meta, None)), ErrorCode::Denied);
+    assert_eq!(code(session.edit(None, "KEY", meta, None, false)), ErrorCode::Denied);
     allow();
 }
 
@@ -273,7 +282,7 @@ fn a_new_expiry_moves_with_the_secret() {
     let mut client = vault.client();
     add_card(&mut client, "Visa", "01/20");
     let (meta, secret) = card("Visa", "12/90");
-    client.edit(None, "Visa", meta, Some(secret)).unwrap();
+    client.edit(None, "Visa", meta, Some(secret), false).unwrap();
     assert_eq!(client.item(None, "Visa").unwrap().meta.expires.as_deref(), Some("2090-12"));
     assert!(client.expiring().unwrap().is_empty());
 }
@@ -362,3 +371,4 @@ fn every_code_at_once_takes_a_touch_and_no_session_gets_them() {
     assert_eq!(code(vault.client().codes(None)), ErrorCode::Denied);
     allow();
 }
+

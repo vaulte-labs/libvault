@@ -275,9 +275,10 @@ impl Client {
 
     /// Changes an item in place, after a touch, and its history keeps what it was. `meta` can
     /// rename it. With no `secret`, the current one stays. A login's setup key never reaches an
-    /// interface, so a login secret with none keeps the one stored; `remove_code` takes it off.
-    pub fn edit(&mut self, space: Option<&str>, name: &str, meta: Meta, secret: Option<Secret>) -> Result<()> {
-        self.call(Request::Edit { space: space.map(str::to_owned), name: name.to_owned(), meta, secret }).map(drop)
+    /// interface, so a login secret with none keeps the one stored; `remove_code` takes it off,
+    /// in the same change, so one `undo` reverses all of it.
+    pub fn edit(&mut self, space: Option<&str>, name: &str, meta: Meta, secret: Option<Secret>, remove_code: bool) -> Result<()> {
+        self.call(Request::Edit { space: space.map(str::to_owned), name: name.to_owned(), meta, secret, remove_code }).map(drop)
     }
 
     /// Every login's current two-factor code, in `space` or every space, after one touch.
@@ -297,11 +298,6 @@ impl Client {
     /// Takes an item out of its space and into `to`, after a touch, as one change `undo` takes back.
     pub fn move_item(&mut self, space: Option<&str>, name: &str, to: &str) -> Result<()> {
         self.call(Request::Move { space: space.map(str::to_owned), name: name.to_owned(), to: to.to_owned() }).map(drop)
-    }
-
-    /// Takes two-factor off a login, after a touch. Its history keeps the setup key.
-    pub fn remove_code(&mut self, space: Option<&str>, name: &str) -> Result<()> {
-        self.call(Request::RemoveCode { space: space.map(str::to_owned), name: name.to_owned() }).map(drop)
     }
 
     /// Lets an env var be sent to `host` through the proxy.

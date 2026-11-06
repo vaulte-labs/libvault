@@ -28,7 +28,7 @@ fn a_linked_item_is_in_both_spaces_and_each_change_reaches_both() {
     assert_eq!(client.item(None, "github.com").unwrap().also_in, ["Agents"]);
     assert_eq!(client.item(Some("Agents"), "github.com").unwrap().also_in, ["Personal"]);
     let meta = client.item(None, "github.com").unwrap().meta;
-    client.edit(None, "github.com", meta, Some(login("second"))).unwrap();
+    client.edit(None, "github.com", meta, Some(login("second")), false).unwrap();
     assert_eq!(client.reveal(Some("Agents"), "github.com").unwrap(), login("second"));
     client.undo().unwrap();
     assert_eq!(client.reveal(Some("Agents"), "github.com").unwrap(), login("first"), "one undo takes back every copy");
@@ -61,7 +61,7 @@ fn removing_it_from_one_space_leaves_the_other_and_later_changes_stay_out() {
     let (_vault, mut client) = linked();
     client.remove(Some("Agents"), "github.com").unwrap();
     let meta = client.item(None, "github.com").unwrap().meta;
-    client.edit(None, "github.com", meta, Some(login("after"))).unwrap();
+    client.edit(None, "github.com", meta, Some(login("after")), false).unwrap();
     assert_eq!(client.reveal(None, "github.com").unwrap(), login("after"));
     assert_eq!(code(client.item(Some("Agents"), "github.com")), ErrorCode::NotFound);
     assert_eq!(client.item(None, "github.com").unwrap().also_in, Vec::<String>::new());
@@ -85,7 +85,7 @@ fn a_name_taken_in_either_space_is_refused_and_nothing_changes() {
     client.add(Some("Agents"), Meta::env("TAKEN"), env("v"), false).unwrap();
     let mut meta = client.item(None, "github.com").unwrap().meta;
     meta.name = "TAKEN".to_owned();
-    assert_eq!(code(client.edit(None, "github.com", meta, None)), ErrorCode::Error);
+    assert_eq!(code(client.edit(None, "github.com", meta, None, false)), ErrorCode::Error);
     assert_eq!(client.item(None, "github.com").unwrap().meta.name, "github.com");
     client.add(None, Meta::env("ELSEWHERE"), env("v"), false).unwrap();
     client.add(Some("Agents"), Meta::env("ELSEWHERE"), env("w"), false).unwrap();
@@ -96,7 +96,7 @@ fn a_name_taken_in_either_space_is_refused_and_nothing_changes() {
 fn restoring_an_old_version_restores_every_copy() {
     let (_vault, mut client) = linked();
     let meta = client.item(None, "github.com").unwrap().meta;
-    client.edit(None, "github.com", meta, Some(login("second"))).unwrap();
+    client.edit(None, "github.com", meta, Some(login("second")), false).unwrap();
     client.restore(None, "github.com", 0).unwrap();
     assert_eq!(client.reveal(Some("Agents"), "github.com").unwrap(), login("first"));
 }

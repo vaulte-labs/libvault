@@ -204,7 +204,6 @@ impl Broker {
             }
             Request::Code { space, name } => self.current_code(caller, space.as_deref(), &name),
             Request::Codes { space } => self.current_codes(caller, space.as_deref()),
-            Request::RemoveCode { space, name } => self.remove_code(caller, space.as_deref(), &name),
             Request::Expiring => self.expiring(caller),
             Request::Icon { space, url } => {
                 self.check(caller, Action::Read)?;
@@ -219,7 +218,7 @@ impl Broker {
                 core.vault.save_icon(&id, &url, &png)?;
                 Ok(Response::Ok)
             }
-            Request::Edit { space, name, meta, secret } => self.edit(caller, space.as_deref(), &name, meta, secret),
+            Request::Edit { space, name, meta, secret, remove_code } => self.edit(caller, space.as_deref(), &name, meta, secret, remove_code),
             Request::Link { space, name, to } => self.copy_to(caller, space.as_deref(), &name, &to, false),
             Request::Move { space, name, to } => self.copy_to(caller, space.as_deref(), &name, &to, true),
             Request::Reveal { space, name } => {
@@ -382,8 +381,9 @@ impl Broker {
     }
 
     /// Changes an item in place, keeping its history. With no `secret`, the current one stays, so
-    /// a rename or a new website does not mean typing a password again.
-    fn edit(&self, caller: &Caller, space: Option<&str>, name: &str, meta: Meta, secret: Option<Secret>) -> Result<Response> {
+    /// a rename or a new website does not mean typing a password again. `remove_code` takes a
+    /// login's two-factor code off in the same write, so one undo reverses the whole save.
+    fn edit(&self, caller: &Caller, space: Option<&str>, name: &str, meta: Meta, secret: Option<Secret>, remove_code: bool) -> Result<Response> {
         match &secret {
             Some(secret) => item::check(&meta, secret)?,
             None => item::validate(&meta)?,
@@ -395,24 +395,17 @@ impl Broker {
         if meta.name != name && self.core().vault.find(&id, &meta.name).is_ok() {
             return Err(Error::Exists(meta.name));
         }
-        self.check(caller, Action::ReplaceItem { name })?;
-        let mut core = self.open_core()?;
-        let stored = core.vault.secret(&id, &current.id)?;
-        let secret = keep_setup_key(secret.unwrap_or_else(|| stored.clone()), &stored);
-        core.vault.replace(&id, &current.id, &meta, &secret)?;
-        core.vault.record("edit", name, caller.name())?;
-        Ok(Response::Ok)
-    }
-
-    fn remove_code(&self, caller: &Caller, space: Option<&str>, name: &str) -> Result<Response> {
-        let (id, current) = self.locate(caller, space, name)?;
-        self.check(caller, Action::ReplaceItem { name })?;
-        let mut core = self.open_core()?;
-        let stored = core.vault.secret(&id, &current.id)?;
-        let Secret::Login { password, totp: Some(_) } = &stored else {
+        if remove_code && !current.meta.two_factor {
             return Err(Error::NotFound(format!("a two-factor code for {name}")));
-        };
-        core.vault.replace(&id, &current.id, &current.meta, &Secret::Login { password: password.clone(), totp: None })?;
+        }
+        self.check(caller, Action::ReplaceItem { name })?;
+        let mut core = self.open_core()?;
+        let stored = core.vault.secret(&id, &current.id)?;
+        let mut secret = keep_setup_key(secret.unwrap_or_else(|| stored.clone()), &stored);
+        if let (true, Secret::Login { totp, .. }) = (remove_code, &mut secret) {
+            *totp = None;
+        }
+        core.vault.replace(&id, &current.id, &meta, &secret)?;
         core.vault.record("edit", name, caller.name())?;
         Ok(Response::Ok)
     }
